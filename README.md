@@ -1,4 +1,4 @@
-# 💿 usb-maker
+# 💿 iso-flasher (gui coming soon)
 
 **A powerful, no-bloat, no-fluff CLI tool to flash ISO files to USB drives.**
 
@@ -47,10 +47,10 @@ No GUI. No bloat. Just **pure C power**.
 ### **1. Clone the repo**
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
-cd usb-maker
+cd iso-flasher
 
 compile it
-gcc -o usb-maker usb-maker.c
+gcc -o iso-flasher iso-flasher.c
 
 run it
-./usb-maker
+./iso-flasher
