@@ -8,7 +8,7 @@
 
 [![C](https://img.shields.io/badge/C-100%25-A8B9CC?style=for-the-badge&logo=c&logoColor=black)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20Termux-1793D1?style=for-the-badge)](https://github.com/anshlabs716/iso-flasher)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://opensource.org/license/mit/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://opensource.org/license/mit/)
 
 ## 🚧 STILL IN DEVELOPMENT 🚧
 
@@ -50,17 +50,7 @@ The project is still being built, so **USB flashing is not functional yet**. Fea
 
 ### 🔍 Automatic Detection
 
-Planned support for package managers including:
-
-- `apt`
-- `dnf`
-- `pacman`
-- `zypper`
-- `xbps`
-- `apk`
-- `brew`
-- `pkg`
-- `emerge`
+iso-flasher is designed to detect the package manager available on the host system.
 
 ### 📦 Dependency Handling
 
@@ -79,20 +69,6 @@ Planned support for utilities such as:
 
 ---
 
-## 📦 Platform Support
-
-| Platform | Status |
-|---|---|
-| 🐧 Linux | 🟢 Primary development target |
-| 📱 Termux | 🟡 Support coming soon |
-| 🍎 macOS | 🟡 Not tested yet |
-| 😈 BSD | 🟡 Not tested yet |
-| 🪟 Windows | 🔴 Not currently supported |
-
-> **Note:** macOS and BSD support is planned but has not been tested yet. Compatibility may change as development continues.
-
----
-
 ## 📦 Supported Package Managers
 
 | Distribution / OS | Package Manager |
@@ -106,8 +82,23 @@ Planned support for utilities such as:
 | 🍎 macOS | `brew` |
 | 😈 FreeBSD | `pkg` |
 | 🧪 Gentoo | `emerge` |
+| 📱 Termux | `pkg` **(Coming Soon)** |
 
-> 🚧 Package-manager support is still being developed and may not work on every listed platform yet.
+> 🚧 **Termux support is coming soon.** Termux's `pkg` package manager has not been fully integrated or tested yet.
+
+---
+
+## 🖥️ Platform Support
+
+| Platform | Status |
+|---|---|
+| 🐧 Linux | 🟢 Primary development target |
+| 📱 Termux | 🟡 Coming soon |
+| 🍎 macOS | 🟡 Not tested yet |
+| 😈 BSD | 🟡 Not tested yet |
+| 🪟 Windows | 🔴 Not currently supported |
+
+> **Note:** macOS and BSD have not been tested yet. Compatibility may change as development continues.
 
 ---
 
@@ -138,7 +129,7 @@ The project has not been fully adapted or tested for Termux yet.
 
 ---
 
-## ⚡ Build
+## ⚡ Quick Start
 
 ### 1. Clone the repository
 
@@ -161,7 +152,7 @@ gcc -o iso-flasher iso-flasher.c
 ./iso-flasher
 ~~~~
 
-> ⚠️ **Development notice:** The current build cannot flash USB drives yet. The flashing functionality is still being implemented.
+> ⚠️ **Development notice:** The current build cannot flash USB drives yet. The USB flashing functionality is still being implemented.
 
 ---
 
@@ -219,6 +210,7 @@ iso-flasher/
 | Progress reporting | 🔴 Planned |
 | GUI | 🟡 Coming soon |
 | Termux support | 🟡 Coming soon |
+| Termux `pkg` support | 🟡 Coming soon |
 | Linux testing | 🟢 Primary target |
 | macOS testing | ⚪ Not tested |
 | BSD testing | ⚪ Not tested |
@@ -236,6 +228,7 @@ iso-flasher/
 - [ ] Improve error handling
 - [ ] Expand Linux support
 - [ ] Add Termux support
+- [ ] Add Termux `pkg` support
 - [ ] Test macOS
 - [ ] Test BSD
 - [ ] Build GUI
@@ -263,6 +256,7 @@ When opening an issue, include:
 - Operating system
 - Distribution/version
 - C compiler and version
+- Package manager
 - What you were doing
 - What happened
 - Any terminal output or errors
@@ -300,6 +294,8 @@ To contribute:
 
 Please see [`SECURITY.md`](SECURITY.md) for security information and vulnerability reporting.
 
+If you discover a security issue, please report it responsibly.
+
 ---
 
 ## 📜 License
@@ -318,14 +314,29 @@ Built with C and a hatred for unnecessary bloat. 🔥
 
 ---
 
+## ⭐ Support
+
+If you find iso-flasher useful:
+
+- ⭐ Star the repository
+- 🐛 Report bugs
+- 💡 Suggest features
+- 🔧 Contribute improvements
+- 🖥️ Help test the upcoming GUI
+- 📱 Help test future Termux support
+
+---
+
 <div align="center">
 
 # 💿 iso-flasher
 
 ### ⚡ No bloat. No fluff. Just ISO flashing.
 
-**🚧 In Development • USB flashing not available yet • GUI coming soon • Termux support coming soon**
+**🚧 In Development • USB flashing not available yet**
 
-**macOS & BSD not tested yet**
+**🖥️ GUI coming soon • 📱 Termux support coming soon**
+
+**🍎 macOS & 😈 BSD not tested yet**
 
 </div>
