@@ -16,59 +16,40 @@
 
 ## ⚡ Quick Start
 
-### 1. Clone the repository
+### Prerequisites
 
-~~~~bash
+On Debian, Ubuntu, MX Linux, and other APT-based distributions:
+
+```bash
+sudo apt update
+sudo apt install -y git cmake build-essential
+```
+
+### Installation
+
+Everything you need to clone, compile, install, and run iso-flasher:
+
+```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
-~~~~
 
-### 2. Compile
-
-Using CMake:
-
-~~~~bash
 cmake -B build
 cmake --build build
-~~~~
 
-### 3. Run
-
-~~~~bash
-sudo ./build/iso-flasher
-~~~~
-
-The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device.
-
-> ⚠️ **Destructive operation:** flashing overwrites the selected device. Verify the target path before confirming.
-
-### 4. Install
-
-To install the compiled binary system-wide:
-
-~~~~bash
 sudo install -m 755 build/iso-flasher /usr/local/bin/iso-flasher
-~~~~
 
-You can then run it from anywhere:
-
-~~~~bash
 sudo iso-flasher
-~~~~
+```
 
-### 5. Uninstall
+### Uninstall
 
-If you installed it to `/usr/local/bin`:
-
-~~~~bash
+```bash
 sudo rm /usr/local/bin/iso-flasher
-~~~~
+rm -rf build
+```
 
-If you only built a local copy in the repository, remove that binary with:
+> ⚠️ **Destructive operation:** iso-flasher writes directly to the selected block device. Verify the target device before confirming the flash.
 
-~~~~bash
-rm -rf iso-flasher
-~~~~
 
 ---
 
