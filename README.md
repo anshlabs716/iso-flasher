@@ -22,18 +22,18 @@ On Debian, Ubuntu, MX Linux, and other APT-based distributions:
 
 ```bash
 sudo apt update
-sudo apt install -y git cmake build-essential
+sudo apt install -y git cmake gcc
 ```
 
 ### Installation
 
-Everything you need to clone, compile, install, and run iso-flasher:
+Everything you need to clone, compile with GCC, install, and run iso-flasher:
 
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
 
-cmake -B build
+cmake -B build -DCMAKE_C_COMPILER=gcc
 cmake --build build
 
 sudo install -m 755 build/iso-flasher /usr/local/bin/iso-flasher
