@@ -28,6 +28,8 @@
   - [1. Clone the repository](#1-clone-the-repository)
   - [2. Compile](#2-compile)
   - [3. Run](#3-run)
+  - [4. Install](#4-install)
+  - [5. Uninstall](#5-uninstall)
 - [🖥️ GUI](#-gui)
   - [🚧 GUI COMING SOON](#-gui-coming-soon)
 - [📁 Project Structure](#-project-structure)
@@ -65,7 +67,7 @@ The goal is simple:
 > 🧹 Keep it lightweight.  
 > 🚫 No unnecessary bloat.
 
-The project is still being built, so **USB flashing is not functional yet**. Features and functionality may change as development continues.
+The project is still being built, and the terminal interface is currently being refined. Linux USB flashing is functional.
 
 ---
 
@@ -186,9 +188,37 @@ gcc -o iso-flasher iso-flasher.c
 sudo ./iso-flasher
 ~~~~
 
-The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device. While the ISO is being written, press `Shift+Tab` to switch between the live flash view and a built-in Snake game; flashing continues in the background.
+The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device.
 
 > ⚠️ **Destructive operation:** flashing overwrites the selected device. Verify the target path before confirming.
+
+### 4. Install
+
+To install the compiled binary system-wide:
+
+~~~~bash
+sudo install -m 755 iso-flasher /usr/local/bin/iso-flasher
+~~~~
+
+You can then run it from anywhere:
+
+~~~~bash
+sudo iso-flasher
+~~~~
+
+### 5. Uninstall
+
+If you installed it to `/usr/local/bin`:
+
+~~~~bash
+sudo rm /usr/local/bin/iso-flasher
+~~~~
+
+If you only built a local copy in the repository, remove that binary with:
+
+~~~~bash
+rm -f iso-flasher
+~~~~
 
 ---
 
@@ -275,7 +305,7 @@ iso-flasher/
 
 ## 🛡️ Safety
 
-Once USB flashing is implemented, iso-flasher will work directly with storage devices.
+iso-flasher works directly with storage devices.
 
 **Always verify the selected drive before writing an ISO.**
 
