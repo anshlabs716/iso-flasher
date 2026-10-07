@@ -143,7 +143,7 @@ static void snake_draw(const SnakeGame *g, double pct) {
         }
         printf("|\n");
     }
-    printf("\n%sWASD / arrows%s move   %sSHIFT%s switch to flash view\n", CYAN, RESET, YELLOW, RESET);
+    printf("\n%sWASD / arrows%s move   %sSHIFT+TAB%s switch to flash view\n", CYAN, RESET, YELLOW, RESET);
     fflush(stdout);
 }
 
@@ -158,6 +158,7 @@ static int snake_key(void) {
             if (b == 'B') return 1001;
             if (b == 'C') return 1002;
             if (b == 'D') return 1003;
+            if (b == 'Z') return 0x10; /* Shift+Tab */
         }
         return -1;
     }
@@ -383,7 +384,7 @@ int raw_block_flash(const char *iso_path, const char *usb_dev, off_t total_size)
             printf("%s" BOLD "💿 ISO FLASHER%s\n\n", CYAN, RESET);
             printf("Progress: %s%.1f%%%s   Speed: %s%.1f MB/s%s   ETA: %s%s%s\n\n",
                    CYAN, pct, RESET, YELLOW, mbps, RESET, GREEN, eta, RESET);
-            printf("%sPress SHIFT to play Snake. Flashing continues while you play.%s\n", GRAY, RESET);
+            printf("%sPress SHIFT+TAB to play Snake. Flashing continues while you play.%s\n", GRAY, RESET);
             fflush(stdout);
         }
     }
