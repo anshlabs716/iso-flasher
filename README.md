@@ -16,7 +16,6 @@
 - [🚧 STILL IN DEVELOPMENT 🚧](#-still-in-development-)
 - [📖 What is iso-flasher?](#-what-is-iso-flasher)
 - [✨ Planned Features](#-planned-features)
-  - [💿 ISO Flashing](#-iso-flashing)
   - [🔍 Automatic Detection](#-automatic-detection)
   - [📦 Dependency Handling](#-dependency-handling)
   - [🎨 User Experience](#-user-experience)
