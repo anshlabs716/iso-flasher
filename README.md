@@ -10,47 +10,6 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20Termux-1793D1?style=for-the-badge)](https://github.com/anshlabs716/iso-flasher)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://opensource.org/license/mit/)
 
-## 📑 Table of Contents
-
-  - [⚡ A Powerful, No-Bloat ISO-to-USB Flasher](#-a-powerful-no-bloat-iso-to-usb-flasher)
-- [🚧 STILL IN DEVELOPMENT 🚧](#-still-in-development-)
-- [📖 What is iso-flasher?](#-what-is-iso-flasher)
-- [✨ Planned Features](#-planned-features)
-  - [🔍 Automatic Detection](#-automatic-detection)
-  - [📦 Dependency Handling](#-dependency-handling)
-  - [🎨 User Experience](#-user-experience)
-- [📦 Supported Package Managers](#-supported-package-managers)
-- [🖥️ Platform Support](#-platform-support)
-- [🛠️ Requirements](#-requirements)
-  - [📱 Termux](#-termux)
-- [⚡ Quick Start](#-quick-start)
-  - [1. Clone the repository](#1-clone-the-repository)
-  - [2. Compile](#2-compile)
-  - [3. Run](#3-run)
-  - [4. Install](#4-install)
-  - [5. Uninstall](#5-uninstall)
-- [🖥️ GUI](#-gui)
-  - [🚧 GUI COMING SOON](#-gui-coming-soon)
-- [📁 Project Structure](#-project-structure)
-- [🧩 Development Status](#-development-status)
-- [🗺️ Roadmap](#-roadmap)
-- [🛡️ Safety](#-safety)
-- [🐛 Bug Reports](#-bug-reports)
-- [🤝 Contributing](#-contributing)
-- [🔐 Security](#-security)
-- [📜 License](#-license)
-- [👨‍💻 Author](#-author)
-- [⭐ Support](#-support)
-
-## 🚧 STILL IN DEVELOPMENT 🚧
-
-**iso-flasher can now write bootable ISO images directly to USB block devices on Linux.**
-
-**GUI coming soon • Termux support coming soon**
-
-> ⚠️ **Platform notice:** Linux is currently the primary development target.  
-> macOS and BSD have **not been tested yet**.
-
 </div>
 
 ---
