@@ -33,6 +33,7 @@
 #include <time.h>
 #include <dirent.h>
 #include <signal.h>
+#include <termios.h>
 
 // ========================================
 // DESIGN SYSTEM (ANSI RGB DRIP)
@@ -49,6 +50,147 @@
 
 #define MAX_PATH 512
 #define CHUNK_SIZE (4 * 1024 * 1024) // 4MB Buffer
+
+
+typedef struct { int x; int y; } SnakePoint;
+typedef struct {
+    SnakePoint body[128];
+    int length;
+    int dx;
+    int dy;
+    SnakePoint food;
+    int score;
+} SnakeGame;
+
+#define SNAKE_W 42
+#define SNAKE_H 14
+static unsigned int snake_seed = 0x51A9C0DEu;
+static int snake_active = 0;
+static int snake_last_view = 0;
+static struct termios snake_old_term;
+
+static unsigned int snake_rand(void) {
+    snake_seed ^= snake_seed << 13;
+    snake_seed ^= snake_seed >> 17;
+    snake_seed ^= snake_seed << 5;
+    return snake_seed;
+}
+
+static int snake_hit(const SnakeGame *g, int x, int y) {
+    for (int i = 0; i < g->length; ++i)
+        if (g->body[i].x == x && g->body[i].y == y) return 1;
+    return 0;
+}
+
+static void snake_food(SnakeGame *g) {
+    for (int i = 0; i < 500; ++i) {
+        int x = (int)(snake_rand() % SNAKE_W);
+        int y = (int)(snake_rand() % SNAKE_H);
+        if (!snake_hit(g, x, y)) {
+            g->food.x = x;
+            g->food.y = y;
+            return;
+        }
+    }
+}
+
+static void snake_init(SnakeGame *g) {
+    memset(g, 0, sizeof(*g));
+    g->length = 3;
+    g->body[0] = (SnakePoint){SNAKE_W / 2, SNAKE_H / 2};
+    g->body[1] = (SnakePoint){SNAKE_W / 2 - 1, SNAKE_H / 2};
+    g->body[2] = (SnakePoint){SNAKE_W / 2 - 2, SNAKE_H / 2};
+    g->dx = 1;
+    g->dy = 0;
+    snake_food(g);
+}
+
+static void snake_step(SnakeGame *g) {
+    SnakePoint n = {g->body[0].x + g->dx, g->body[0].y + g->dy};
+    if (n.x < 0 || n.x >= SNAKE_W || n.y < 0 || n.y >= SNAKE_H || snake_hit(g, n.x, n.y)) {
+        snake_init(g);
+        g->score = 0;
+        return;
+    }
+    int ate = n.x == g->food.x && n.y == g->food.y;
+    int old_length = g->length;
+    if (ate && g->length < 128) g->length++;
+    for (int i = g->length - 1; i > 0; --i) g->body[i] = g->body[i - 1];
+    g->body[0] = n;
+    if (ate) {
+        g->score++;
+        snake_food(g);
+    } else {
+        g->length = old_length;
+    }
+}
+
+static void snake_draw(const SnakeGame *g, double pct) {
+    printf("\033[H\033[2J");
+    printf("%s" BOLD "🐍 SNAKE%s   Flash: %.1f%%   Score: %d\n\n", GREEN, RESET, pct, g->score);
+    for (int y = 0; y < SNAKE_H; ++y) {
+        putchar('|');
+        for (int x = 0; x < SNAKE_W; ++x) {
+            char ch = ' ';
+            if (x == g->food.x && y == g->food.y) ch = '@';
+            for (int i = 0; i < g->length; ++i) {
+                if (g->body[i].x == x && g->body[i].y == y) {
+                    ch = i == 0 ? 'O' : 'o';
+                    break;
+                }
+            }
+            putchar(ch);
+        }
+        printf("|\n");
+    }
+    printf("\n%sWASD / arrows%s move   %sSHIFT%s switch to flash view\n", CYAN, RESET, YELLOW, RESET);
+    fflush(stdout);
+}
+
+static int snake_key(void) {
+    unsigned char c;
+    if (read(STDIN_FILENO, &c, 1) != 1) return -1;
+    if (c == 0x10) return 0x10;
+    if (c == 0x1b) {
+        unsigned char a, b;
+        if (read(STDIN_FILENO, &a, 1) == 1 && a == '[' && read(STDIN_FILENO, &b, 1) == 1) {
+            if (b == 'A') return 1000;
+            if (b == 'B') return 1001;
+            if (b == 'C') return 1002;
+            if (b == 'D') return 1003;
+        }
+        return -1;
+    }
+    return c;
+}
+
+static void snake_key_apply(SnakeGame *g, int k) {
+    if (k == 0x10) { snake_last_view = !snake_last_view; return; }
+    if ((k == 'w' || k == 1000) && g->dy != 1) { g->dx = 0; g->dy = -1; }
+    else if ((k == 's' || k == 1001) && g->dy != -1) { g->dx = 0; g->dy = 1; }
+    else if ((k == 'a' || k == 1003) && g->dx != 1) { g->dx = -1; g->dy = 0; }
+    else if ((k == 'd' || k == 1002) && g->dx != -1) { g->dx = 1; g->dy = 0; }
+}
+
+static int snake_start_terminal(void) {
+    if (!isatty(STDIN_FILENO)) return 0;
+    if (tcgetattr(STDIN_FILENO, &snake_old_term) != 0) return 0;
+    struct termios raw = snake_old_term;
+    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return 0;
+    printf("\033[?25l");
+    snake_active = 1;
+    return 1;
+}
+
+static void snake_stop_terminal(void) {
+    if (snake_active) tcsetattr(STDIN_FILENO, TCSANOW, &snake_old_term);
+    snake_active = 0;
+    printf("\033[?25h\033[0m\033[2J\033[H");
+    fflush(stdout);
+}
 
 typedef struct {
     char iso_path[MAX_PATH];
@@ -183,130 +325,95 @@ void format_time(double seconds, char *buffer) {
 
 int raw_block_flash(const char *iso_path, const char *usb_dev, off_t total_size) {
     int fd_in = open(iso_path, O_RDONLY);
-    if (fd_in < 0) {
-        perror("Error opening ISO");
-        return 1;
-    }
-
+    if (fd_in < 0) { perror("Error opening ISO"); return 1; }
     int fd_out = open(usb_dev, O_WRONLY);
-    if (fd_out < 0) {
-        perror("Error opening target block device");
-        close(fd_in);
-        return 1;
-    }
+    if (fd_out < 0) { perror("Error opening target block device"); close(fd_in); return 1; }
 
     void *buffer = NULL;
-    if (posix_memalign(&buffer, 4096, CHUNK_SIZE) != 0)
-        buffer = malloc(CHUNK_SIZE);
+    if (posix_memalign(&buffer, 4096, CHUNK_SIZE) != 0) buffer = malloc(CHUNK_SIZE);
+    if (!buffer) { log_msg("FATAL", RED, "Could not allocate flash buffer."); close(fd_in); close(fd_out); return 1; }
 
-    if (!buffer) {
-        log_msg("FATAL", RED, "Could not allocate flash buffer.");
-        close(fd_in);
-        close(fd_out);
-        return 1;
-    }
+    SnakeGame game;
+    snake_init(&game);
+    snake_seed ^= (unsigned int)time(NULL) ^ (unsigned int)getpid();
+    snake_start_terminal();
 
     off_t total_written = 0;
-    ssize_t read_bytes;
-    struct timespec start_time, current;
+    ssize_t read_bytes = 0;
+    struct timespec start_time, now;
+    double last_snake = 0.0;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-    log_msg("FLASH", BLUE, "Writing ISO directly to the USB block device...");
 
     while (keep_running && (read_bytes = read(fd_in, buffer, CHUNK_SIZE)) > 0) {
         ssize_t offset = 0;
-
-        /* write() is allowed to write fewer bytes than requested. */
         while (offset < read_bytes) {
-            ssize_t written = write(fd_out, (char *)buffer + offset,
-                                    (size_t)(read_bytes - offset));
+            ssize_t written = write(fd_out, (char *)buffer + offset, (size_t)(read_bytes - offset));
             if (written < 0) {
-                if (errno == EINTR)
-                    continue;
+                if (errno == EINTR) continue;
                 perror("Error writing to USB device");
                 keep_running = 0;
                 break;
             }
-            if (written == 0) {
-                log_msg("IO_ERR", RED, "USB device returned a zero-byte write.");
-                keep_running = 0;
-                break;
-            }
+            if (written == 0) { log_msg("IO_ERR", RED, "USB device returned a zero-byte write."); keep_running = 0; break; }
             offset += written;
             total_written += written;
         }
+        if (!keep_running) break;
 
-        if (!keep_running)
-            break;
+        int key;
+        while ((key = snake_key()) != -1) snake_key_apply(&game, key);
 
-        clock_gettime(CLOCK_MONOTONIC, &current);
-        double elapsed =
-            (current.tv_sec - start_time.tv_sec) +
-            (current.tv_nsec - start_time.tv_nsec) / 1e9;
-        double mbps = (total_written / (1024.0 * 1024.0)) /
-                      (elapsed > 0 ? elapsed : 1);
-        double pct = total_size > 0
-            ? ((double)total_written / (double)total_size) * 100.0
-            : 0.0;
-
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        double elapsed = (now.tv_sec - start_time.tv_sec) + (now.tv_nsec - start_time.tv_nsec) / 1e9;
+        double mbps = (total_written / (1024.0 * 1024.0)) / (elapsed > 0 ? elapsed : 1);
+        double pct = total_size > 0 ? (100.0 * (double)total_written / (double)total_size) : 0.0;
         if (pct > 100.0) pct = 100.0;
 
-        char eta[32];
-        format_time(
-            (mbps > 0 && pct > 0)
-                ? ((double)total_size - (double)total_written) /
-                      (1024.0 * 1024.0) / mbps
-                : 0,
-            eta
-        );
-
-        int width = 30;
-        int current_pos = (int)(width * pct / 100.0);
-        if (current_pos > width) current_pos = width;
-
-        printf("\r %s⚡ [", MAGENTA);
-        for (int i = 0; i < width; i++)
-            printf("%s", i < current_pos ? "█" : (i == current_pos ? "▓" : "░"));
-        printf("] %s%.1f%% %s| %s%.1f MB/s %s| %sETA: %s%s   ",
-               CYAN, pct, GRAY, YELLOW, mbps, GRAY, GREEN, eta, RESET);
-        fflush(stdout);
+        if (snake_last_view) {
+            double current_time = now.tv_sec + now.tv_nsec / 1e9;
+            if (current_time - last_snake >= 0.12) {
+                snake_step(&game);
+                last_snake = current_time;
+            }
+            snake_draw(&game, pct);
+        } else {
+            printf("\033[H\033[2J");
+            char eta[32];
+            format_time(mbps > 0 ? ((double)total_size - (double)total_written) / (1024.0 * 1024.0) / mbps : 0, eta);
+            printf("%s" BOLD "💿 ISO FLASHER%s\n\n", CYAN, RESET);
+            printf("Progress: %s%.1f%%%s   Speed: %s%.1f MB/s%s   ETA: %s%s%s\n\n",
+                   CYAN, pct, RESET, YELLOW, mbps, RESET, GREEN, eta, RESET);
+            printf("%sPress SHIFT to play Snake. Flashing continues while you play.%s\n", GRAY, RESET);
+            fflush(stdout);
+        }
     }
 
-    if (read_bytes < 0 && keep_running)
-        perror("Error reading ISO");
-
+    if (read_bytes < 0 && keep_running) perror("Error reading ISO");
     printf("\n\n");
-
     if (!keep_running) {
-        log_msg("STOP", YELLOW, "Flashing stopped before completion.");
-        free(buffer);
-        close(fd_in);
-        close(fd_out);
+        snake_stop_terminal();
+        free(buffer); close(fd_in); close(fd_out);
         return 1;
     }
 
     log_msg("SYNC", MAGENTA, "Syncing all data to the USB device...");
     if (fsync(fd_out) != 0) {
         perror("fsync");
-        free(buffer);
-        close(fd_in);
-        close(fd_out);
+        snake_stop_terminal();
+        free(buffer); close(fd_in); close(fd_out);
         return 1;
     }
-
-    /* Flush the kernel block-device cache when supported. */
-    if (ioctl(fd_out, BLKFLSBUF) != 0 && errno != EINVAL && errno != ENOTTY)
-        perror("BLKFLSBUF");
+    if (ioctl(fd_out, BLKFLSBUF) != 0 && errno != EINVAL && errno != ENOTTY) perror("BLKFLSBUF");
 
     free(buffer);
     close(fd_in);
     close(fd_out);
+    snake_stop_terminal();
 
     if (total_written != total_size) {
         log_msg("FAIL", RED, "The complete ISO was not written.");
         return 1;
     }
-
     log_msg("DONE", GREEN, "ISO successfully written to the USB device.");
     return 0;
 }
