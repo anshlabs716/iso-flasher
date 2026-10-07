@@ -56,6 +56,64 @@
 
 ---
 
+## ⚡ Quick Start
+
+### 1. Clone the repository
+
+~~~~bash
+git clone https://github.com/anshlabs716/iso-flasher.git
+cd iso-flasher
+~~~~
+
+### 2. Compile
+
+Using CMake:
+
+~~~~bash
+cmake -B build
+cmake --build build
+~~~~
+
+### 3. Run
+
+~~~~bash
+sudo ./build/iso-flasher
+~~~~
+
+The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device.
+
+> ⚠️ **Destructive operation:** flashing overwrites the selected device. Verify the target path before confirming.
+
+### 4. Install
+
+To install the compiled binary system-wide:
+
+~~~~bash
+sudo install -m 755 build/iso-flasher /usr/local/bin/iso-flasher
+~~~~
+
+You can then run it from anywhere:
+
+~~~~bash
+sudo iso-flasher
+~~~~
+
+### 5. Uninstall
+
+If you installed it to `/usr/local/bin`:
+
+~~~~bash
+sudo rm /usr/local/bin/iso-flasher
+~~~~
+
+If you only built a local copy in the repository, remove that binary with:
+
+~~~~bash
+rm -f iso-flasher
+~~~~
+
+---
+
 ## 📖 What is iso-flasher?
 
 **iso-flasher** is a lightweight C-based ISO-to-USB flashing tool currently under active development.
@@ -165,60 +223,6 @@ The project has not been fully adapted or tested for Termux yet.
 
 ---
 
-## ⚡ Quick Start
-
-### 1. Clone the repository
-
-~~~~bash
-git clone https://github.com/anshlabs716/iso-flasher.git
-cd iso-flasher
-~~~~
-
-### 2. Compile
-
-Using GCC:
-
-~~~~bash
-gcc -o iso-flasher iso-flasher.c
-~~~~
-
-### 3. Run
-
-~~~~bash
-sudo ./iso-flasher
-~~~~
-
-The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device.
-
-> ⚠️ **Destructive operation:** flashing overwrites the selected device. Verify the target path before confirming.
-
-### 4. Install
-
-To install the compiled binary system-wide:
-
-~~~~bash
-sudo install -m 755 iso-flasher /usr/local/bin/iso-flasher
-~~~~
-
-You can then run it from anywhere:
-
-~~~~bash
-sudo iso-flasher
-~~~~
-
-### 5. Uninstall
-
-If you installed it to `/usr/local/bin`:
-
-~~~~bash
-sudo rm /usr/local/bin/iso-flasher
-~~~~
-
-If you only built a local copy in the repository, remove that binary with:
-
-~~~~bash
-rm -rf iso-flasher
-~~~~
 
 ---
 
