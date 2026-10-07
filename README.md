@@ -132,7 +132,7 @@ Planned support for utilities such as:
 | 📱 Termux | 🟡 Coming soon |
 | 🍎 macOS | 🟡 Not tested yet |
 | 😈 BSD | 🟡 Not tested yet |
-| 🪟 Windows | 🔴 Not currently supported |
+| 🪟 Windows | 🔴 Not currently supported AND NEVER WILL BE 🤣️ |
 
 > **Note:** macOS and BSD have not been tested yet. Compatibility may change as development continues.
 
