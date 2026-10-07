@@ -244,14 +244,17 @@ void print_banner() {
 // ========================================
 void run_system_profile() {
     struct sysinfo info;
-    printf("%s" BOLD "System%s\n", CYAN, RESET);
+    double used_ram = 0.0, total_ram = 0.0, load = 0.0;
     if (sysinfo(&info) == 0) {
-        double total_ram = (double)info.totalram * info.mem_unit / (1024 * 1024 * 1024);
+        total_ram = (double)info.totalram * info.mem_unit / (1024 * 1024 * 1024);
         double free_ram = (double)info.freeram * info.mem_unit / (1024 * 1024 * 1024);
-        printf("  RAM     %.1f / %.1f GB used\n", total_ram - free_ram, total_ram);
-        printf("  Load    %.2f\n", info.loads[0] / 65536.0);
+        used_ram = total_ram - free_ram;
+        load = info.loads[0] / 65536.0;
     }
-    printf("\n");
+    printf("%s┌─ SYSTEM ──────────────────────────────────────────────────────────────┐%s\n", BLUE, RESET);
+    printf("%s│%s  RAM %5.1f / %-5.1f GB     Load %-6.2f                         %s│%s\n",
+           BLUE, RESET, used_ram, total_ram, load, BLUE, RESET);
+    printf("%s└───────────────────────────────────────────────────────────────────────┘%s\n\n", BLUE, RESET);
 }
 
 int is_removable_usb(const char *device) {
@@ -284,35 +287,35 @@ unsigned long long get_device_size(const char *device) {
 }
 
 void show_sysfs_drives() {
-    printf("%s" BOLD "Available USB drives%s\n", MAGENTA, RESET);
-    printf("%s%-4s %-16s %12s%s\n", GRAY, "#", "Device", "Size", RESET);
-    printf("%s----------------------------------%s\n", GRAY, RESET);
-
+    printf("%s┌─ USB DEVICES ─────────────────────────────────────────────────────────┐%s\n", MAGENTA, RESET);
+    printf("%s│%s  %-4s %-22s %-12s                                      %s│%s\n",
+           MAGENTA, RESET, "#", "Device", "Size", MAGENTA, RESET);
+    printf("%s├───────────────────────────────────────────────────────────────────────┤%s\n", MAGENTA, RESET);
     DIR *dp = opendir("/sys/block");
     if (!dp) {
-        printf("%s  No devices found.%s\n\n", YELLOW, RESET);
+        printf("%s│%s  %sUnable to read /sys/block%s                                          %s│%s\n", MAGENTA, RESET, RED, RESET, MAGENTA, RESET);
+        printf("%s└───────────────────────────────────────────────────────────────────────┘%s\n\n", MAGENTA, RESET);
         return;
     }
-
     struct dirent *entry;
     int count = 0;
     while ((entry = readdir(dp))) {
         if (entry->d_name[0] == '.' || strncmp(entry->d_name, "loop", 4) == 0) continue;
-
         char node_path[MAX_PATH];
         snprintf(node_path, sizeof(node_path), "/dev/%s", entry->d_name);
-
         if (is_removable_usb(node_path)) {
             unsigned long long bytes = get_device_size(node_path);
             double gb = (double)bytes / (1024 * 1024 * 1024);
-            printf("  %-2d  %-16s %8.2f GB\n", ++count, node_path, gb);
+            printf("%s│%s  %-4d %-22s %-12.2f GB                                  %s│%s\n",
+                   MAGENTA, RESET, ++count, node_path, gb, MAGENTA, RESET);
         }
     }
     closedir(dp);
-
-    if (count == 0)
-        printf("  %sNo removable USB drives detected.%s\n", YELLOW, RESET);
-    printf("\n");
+    if (count == 0) {
+        printf("%s│%s  %sNo removable USB drives detected.%s                          %s│%s\n", MAGENTA, RESET, YELLOW, RESET, MAGENTA, RESET);
+        printf("%s│%s  Press %s[R]%s to refresh USB devices.                         %s│%s\n", MAGENTA, RESET, GREEN, RESET, MAGENTA, RESET);
+    }
+    printf("%s└───────────────────────────────────────────────────────────────────────┘%s\n\n", MAGENTA, RESET);
 }
 
 // ========================================
@@ -528,23 +531,35 @@ int main(int argc, char *argv[]) {
     run_system_profile();
 
     if (interactive) {
-        show_sysfs_drives();
+        for (;;) {
+            system("clear");
+            print_banner();
+            run_system_profile();
+            show_sysfs_drives();
 
-        printf("%sISO file path%s\n> ", YELLOW, RESET);
-        char choice_iso[MAX_PATH];
-        if (fgets(choice_iso, sizeof(choice_iso), stdin)) {
+            printf("%s┌─ ISO IMAGE ────────────────────────────────────────────────────────────┐%s\n", YELLOW, RESET);
+            printf("%s│%s  Path: ", YELLOW, RESET);
+            char choice_iso[MAX_PATH];
+            if (!fgets(choice_iso, sizeof(choice_iso), stdin)) return 1;
             choice_iso[strcspn(choice_iso, "\n")] = 0;
-            strncpy(app_config.iso_path, choice_iso, MAX_PATH);
-        }
+            if (choice_iso[0] == '\0') continue;
+            if (choice_iso[0] == 'r' || choice_iso[0] == 'R') continue;
+            strncpy(app_config.iso_path, choice_iso, MAX_PATH - 1);
+            app_config.iso_path[MAX_PATH - 1] = '\0';
+            printf("%s└───────────────────────────────────────────────────────────────────────┘%s\n\n", YELLOW, RESET);
 
-        printf("%sUSB device (for example /dev/sdb)%s\n> ", YELLOW, RESET);
-        char choice_dev[MAX_PATH];
-        if (fgets(choice_dev, sizeof(choice_dev), stdin)) {
+            printf("%s┌─ TARGET DEVICE ────────────────────────────────────────────────────────┐%s\n", GREEN, RESET);
+            printf("%s│%s  Device: ", GREEN, RESET);
+            char choice_dev[MAX_PATH];
+            if (!fgets(choice_dev, sizeof(choice_dev), stdin)) return 1;
             choice_dev[strcspn(choice_dev, "\n")] = 0;
-            strncpy(app_config.target_dev, choice_dev, MAX_PATH);
+            if (choice_dev[0] == 'r' || choice_dev[0] == 'R') continue;
+            strncpy(app_config.target_dev, choice_dev, MAX_PATH - 1);
+            app_config.target_dev[MAX_PATH - 1] = '\0';
+            printf("%s└───────────────────────────────────────────────────────────────────────┘%s\n\n", GREEN, RESET);
+            break;
         }
     }
-
     if (strlen(app_config.iso_path) == 0 || strlen(app_config.target_dev) == 0) {
         log_msg("FATAL", RED, "Execution sequence missing operating parameters. Run interactive or pass arguments.");
         return 1;
