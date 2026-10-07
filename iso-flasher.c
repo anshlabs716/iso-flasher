@@ -184,73 +184,131 @@ void format_time(double seconds, char *buffer) {
 int raw_block_flash(const char *iso_path, const char *usb_dev, off_t total_size) {
     int fd_in = open(iso_path, O_RDONLY);
     if (fd_in < 0) {
-        perror("Error parsing installation media file descriptor");
+        perror("Error opening ISO");
         return 1;
     }
 
-    int fd_out = open(usb_dev, O_WRONLY | O_SYNC);
+    int fd_out = open(usb_dev, O_WRONLY);
     if (fd_out < 0) {
-        perror("Target hardware stream alignment rejected");
+        perror("Error opening target block device");
         close(fd_in);
         return 1;
     }
 
     void *buffer = NULL;
-    if (posix_memalign(&buffer, 4096, CHUNK_SIZE) != 0) {
+    if (posix_memalign(&buffer, 4096, CHUNK_SIZE) != 0)
         buffer = malloc(CHUNK_SIZE);
-    }
 
     if (!buffer) {
-        log_msg("FATAL", RED, "Virtual hardware buffer allocation overflow.");
-        close(fd_in); close(fd_out);
+        log_msg("FATAL", RED, "Could not allocate flash buffer.");
+        close(fd_in);
+        close(fd_out);
         return 1;
     }
 
     off_t total_written = 0;
     ssize_t read_bytes;
-    struct timespec start, current;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    struct timespec start_time, current;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-    log_msg("LAUNCH", BLUE, "Igniting low-level block mirror engine...");
-    printf("\n");
+    log_msg("FLASH", BLUE, "Writing ISO directly to the USB block device...");
 
     while (keep_running && (read_bytes = read(fd_in, buffer, CHUNK_SIZE)) > 0) {
-        ssize_t written = write(fd_out, buffer, read_bytes);
-        if (written != read_bytes) {
-            log_msg("IO_ERR", RED, "Critical write degradation detected. Flashing broken.");
-            break;
+        ssize_t offset = 0;
+
+        /* write() is allowed to write fewer bytes than requested. */
+        while (offset < read_bytes) {
+            ssize_t written = write(fd_out, (char *)buffer + offset,
+                                    (size_t)(read_bytes - offset));
+            if (written < 0) {
+                if (errno == EINTR)
+                    continue;
+                perror("Error writing to USB device");
+                keep_running = 0;
+                break;
+            }
+            if (written == 0) {
+                log_msg("IO_ERR", RED, "USB device returned a zero-byte write.");
+                keep_running = 0;
+                break;
+            }
+            offset += written;
+            total_written += written;
         }
 
-        total_written += written;
+        if (!keep_running)
+            break;
 
         clock_gettime(CLOCK_MONOTONIC, &current);
-        double delta = (current.tv_sec - start.tv_sec) + (current.tv_nsec - start.tv_nsec) / 1e9;
-        double mbps = (total_written / (1024.0 * 1024.0)) / (delta > 0 ? delta : 1);
-        double pct = ((double)total_written / total_size) * 100.0;
+        double elapsed =
+            (current.tv_sec - start_time.tv_sec) +
+            (current.tv_nsec - start_time.tv_nsec) / 1e9;
+        double mbps = (total_written / (1024.0 * 1024.0)) /
+                      (elapsed > 0 ? elapsed : 1);
+        double pct = total_size > 0
+            ? ((double)total_written / (double)total_size) * 100.0
+            : 0.0;
+
+        if (pct > 100.0) pct = 100.0;
 
         char eta[32];
-        format_time((pct > 0) ? (total_size - total_written) / (1024.0 * 1024.0) / mbps : 0, eta);
+        format_time(
+            (mbps > 0 && pct > 0)
+                ? ((double)total_size - (double)total_written) /
+                      (1024.0 * 1024.0) / mbps
+                : 0,
+            eta
+        );
 
         int width = 30;
-        int current_pos = width * pct / 100;
+        int current_pos = (int)(width * pct / 100.0);
+        if (current_pos > width) current_pos = width;
+
         printf("\r %s⚡ [", MAGENTA);
-        for (int i = 0; i < width; i++) {
-            if (i < current_pos) printf("█");
-            else if (i == current_pos) printf("▓");
-            else printf("░");
-        }
-        printf("] %s%.1f%% %s| %s%.1f MB/s %s| %sETA: %s%s   ", CYAN, pct, GRAY, YELLOW, mbps, GRAY, GREEN, eta, RESET);
+        for (int i = 0; i < width; i++)
+            printf("%s", i < current_pos ? "█" : (i == current_pos ? "▓" : "░"));
+        printf("] %s%.1f%% %s| %s%.1f MB/s %s| %sETA: %s%s   ",
+               CYAN, pct, GRAY, YELLOW, mbps, GRAY, GREEN, eta, RESET);
         fflush(stdout);
     }
 
+    if (read_bytes < 0 && keep_running)
+        perror("Error reading ISO");
+
     printf("\n\n");
-    log_msg("SYNC", MAGENTA, "Forcing direct file allocation synchronization layer...");
-    fsync(fd_out);
+
+    if (!keep_running) {
+        log_msg("STOP", YELLOW, "Flashing stopped before completion.");
+        free(buffer);
+        close(fd_in);
+        close(fd_out);
+        return 1;
+    }
+
+    log_msg("SYNC", MAGENTA, "Syncing all data to the USB device...");
+    if (fsync(fd_out) != 0) {
+        perror("fsync");
+        free(buffer);
+        close(fd_in);
+        close(fd_out);
+        return 1;
+    }
+
+    /* Flush the kernel block-device cache when supported. */
+    if (ioctl(fd_out, BLKFLSBUF) != 0 && errno != EINVAL && errno != ENOTTY)
+        perror("BLKFLSBUF");
 
     free(buffer);
     close(fd_in);
     close(fd_out);
-    return (total_written == total_size) ? 0 : 1;
+
+    if (total_written != total_size) {
+        log_msg("FAIL", RED, "The complete ISO was not written.");
+        return 1;
+    }
+
+    log_msg("DONE", GREEN, "ISO successfully written to the USB device.");
+    return 0;
 }
 
 int pipeline_execution() {
@@ -285,10 +343,34 @@ int pipeline_execution() {
     }
 
     log_msg("MOUNT", BLUE, "Clearing shared runtime mounts...");
-    char clear_mount[MAX_PATH];
-    snprintf(clear_mount, sizeof(clear_mount), "sudo umount -q %s* 2>/dev/null", app_config.target_dev);
-    system(clear_mount);
+    /*
+     * Unmount partitions before opening the whole disk.  The target must be
+     * a /dev/<device> node, and we only invoke umount with an argv array so
+     * a device path cannot become shell syntax.
+     */
+    if (strncmp(app_config.target_dev, "/dev/", 5) != 0 ||
+        strchr(app_config.target_dev + 5, '/') != NULL) {
+        log_msg("ABORT", RED, "Target must be a direct /dev/<device> block node.");
+        return 1;
+    }
 
+    char unmount_cmd[MAX_PATH + 16];
+    snprintf(unmount_cmd, sizeof(unmount_cmd), "%s", app_config.target_dev);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/bin/umount", "umount", unmount_cmd, (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) {
+        int status = 0;
+        waitpid(pid, &status, 0);
+        /* A whole-disk unmount may legitimately fail because only partitions
+           are mounted; the raw write below is what requires the disk itself
+           to be unused. */
+    }
+
+    sync();
     return raw_block_flash(app_config.iso_path, app_config.target_dev, st.st_size);
 }
 
