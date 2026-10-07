@@ -217,7 +217,7 @@ sudo rm /usr/local/bin/iso-flasher
 If you only built a local copy in the repository, remove that binary with:
 
 ~~~~bash
-rm -f iso-flasher
+rm -rf iso-flasher
 ~~~~
 
 ---
