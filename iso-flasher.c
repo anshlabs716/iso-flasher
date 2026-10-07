@@ -127,7 +127,7 @@ static void snake_step(SnakeGame *g) {
 
 static void snake_draw(const SnakeGame *g, double pct) {
     printf("\033[H\033[2J");
-    printf("%s" BOLD "🐍 SNAKE%s   Flash: %.1f%%   Score: %d\n\n", GREEN, RESET, pct, g->score);
+    printf("%s" BOLD "🐍 SNAKE%s    Flash %5.1f%%    Score %d\n\n", GREEN, RESET, pct, g->score);
     for (int y = 0; y < SNAKE_H; ++y) {
         putchar('|');
         for (int x = 0; x < SNAKE_W; ++x) {
@@ -143,7 +143,7 @@ static void snake_draw(const SnakeGame *g, double pct) {
         }
         printf("|\n");
     }
-    printf("\n%sWASD / arrows%s move   %sSHIFT+TAB%s switch to flash view\n", CYAN, RESET, YELLOW, RESET);
+    printf("\n  %sWASD / arrows%s move    %sShift+Tab%s flash view\n", CYAN, RESET, YELLOW, RESET);
     fflush(stdout);
 }
 
@@ -243,19 +243,14 @@ void print_banner() {
 // CORE DIAGNOSTICS & SYSTEM MONITOR
 // ========================================
 void run_system_profile() {
-    printf("%s" BOLD "📊 CORE HOST ENVIRONMENT PROFILE" RESET "\n", CYAN);
-    printf("%s─────────────────────────────────────────────────────────%s\n", GRAY, RESET);
-
     struct sysinfo info;
+    printf("%s" BOLD "System%s\n", CYAN, RESET);
     if (sysinfo(&info) == 0) {
         double total_ram = (double)info.totalram * info.mem_unit / (1024 * 1024 * 1024);
         double free_ram = (double)info.freeram * info.mem_unit / (1024 * 1024 * 1024);
-        printf("%s ► CPU Scheduler Load:%s  %.2f\n", GREEN, RESET, info.loads[0] / 65536.0);
-        printf("%s ► Physical Memory:   %s  %.2f GB used / %.2f GB available\n", GREEN, RESET, total_ram - free_ram, total_ram);
+        printf("  RAM     %.1f / %.1f GB used\n", total_ram - free_ram, total_ram);
+        printf("  Load    %.2f\n", info.loads[0] / 65536.0);
     }
-
-    // The fanless rig warning
-    printf("\n%s⚠️  THERMAL WARNING:%s If you're running a fanless rig keep htop/btop open in another terminal this will literally cook your ram and cpu. Keep an eye on those temps.%s\n", RED, YELLOW, RESET);
     printf("\n");
 }
 
@@ -289,11 +284,15 @@ unsigned long long get_device_size(const char *device) {
 }
 
 void show_sysfs_drives() {
-    printf("%s" BOLD "💽 TARGETABLE HARDWARE SIGNATURES" RESET "\n", MAGENTA);
-    printf("%s─────────────────────────────────────────────────────────%s\n", GRAY, RESET);
+    printf("%s" BOLD "Available USB drives%s\n", MAGENTA, RESET);
+    printf("%s%-4s %-16s %12s%s\n", GRAY, "#", "Device", "Size", RESET);
+    printf("%s----------------------------------%s\n", GRAY, RESET);
 
     DIR *dp = opendir("/sys/block");
-    if (!dp) return;
+    if (!dp) {
+        printf("%s  No devices found.%s\n\n", YELLOW, RESET);
+        return;
+    }
 
     struct dirent *entry;
     int count = 0;
@@ -306,12 +305,13 @@ void show_sysfs_drives() {
         if (is_removable_usb(node_path)) {
             unsigned long long bytes = get_device_size(node_path);
             double gb = (double)bytes / (1024 * 1024 * 1024);
-            printf(" %s[USB Target] %s%s %s(%.2f GB)%s\n", GREEN, BOLD, node_path, YELLOW, gb, RESET);
-            count++;
+            printf("  %-2d  %-16s %8.2f GB\n", ++count, node_path, gb);
         }
     }
     closedir(dp);
-    if (count == 0) printf("%s [!] Universal storage alert: No flash storage found.%s\n", YELLOW, RESET);
+
+    if (count == 0)
+        printf("  %sNo removable USB drives detected.%s\n", YELLOW, RESET);
     printf("\n");
 }
 
@@ -381,10 +381,19 @@ int raw_block_flash(const char *iso_path, const char *usb_dev, off_t total_size)
             printf("\033[H\033[2J");
             char eta[32];
             format_time(mbps > 0 ? ((double)total_size - (double)total_written) / (1024.0 * 1024.0) / mbps : 0, eta);
-            printf("%s" BOLD "💿 ISO FLASHER%s\n\n", CYAN, RESET);
-            printf("Progress: %s%.1f%%%s   Speed: %s%.1f MB/s%s   ETA: %s%s%s\n\n",
-                   CYAN, pct, RESET, YELLOW, mbps, RESET, GREEN, eta, RESET);
-            printf("%sPress SHIFT+TAB to play Snake. Flashing continues while you play.%s\n", GRAY, RESET);
+            int width = 42;
+            int filled = (int)(pct * width / 100.0);
+            if (filled < 0) filled = 0;
+            if (filled > width) filled = width;
+            printf("%s" BOLD "ISO FLASHER%s\n\n", CYAN, RESET);
+            printf("  Device  %s%s%s\n", BOLD, usb_dev, RESET);
+            printf("  Image   %s\n\n", iso_path);
+            printf("  [");
+            for (int i = 0; i < width; ++i) putchar(i < filled ? '=' : ' ');
+            printf("] %s%5.1f%%%s\n\n", CYAN, pct, RESET);
+            printf("  Speed   %8.1f MB/s\n", mbps);
+            printf("  ETA     %s\n", eta);
+            printf("\n  %sShift+Tab%s  Snake    %sCtrl+C%s  Cancel\n", YELLOW, RESET, GRAY, RESET);
             fflush(stdout);
         }
     }
@@ -437,9 +446,11 @@ int pipeline_execution() {
         return 1;
     }
 
-    printf("\n%s 🔥 DANGEROUS HIGH-LEVEL OPERATIONAL OVERLAP 🔥%s\n", RED, RESET);
-    printf(" Flash Node:  %s%s%s\n", BOLD, app_config.target_dev, RESET);
-    printf(" Action Code: Enter '%sFLASH%s' to confirm block rewriting: ", GREEN, RESET);
+    printf("\n%s" BOLD "Ready to flash%s\n\n", RED, RESET);
+    printf("  ISO       %s\n", app_config.iso_path);
+    printf("  Device    %s%s%s\n", BOLD, app_config.target_dev, RESET);
+    printf("\n%sThis will erase the selected device.%s\n", YELLOW, RESET);
+    printf("Type %sFLASH%s to continue: ", GREEN, RESET);
 
     char verify[32];
     if (!fgets(verify, sizeof(verify), stdin)) return 1;
@@ -450,7 +461,7 @@ int pipeline_execution() {
         return 0;
     }
 
-    log_msg("MOUNT", BLUE, "Clearing shared runtime mounts...");
+    log_msg("UNMOUNT", BLUE, "Unmounting target device...");
     /*
      * Unmount partitions before opening the whole disk.  The target must be
      * a /dev/<device> node, and we only invoke umount with an argv array so
@@ -488,7 +499,7 @@ int pipeline_execution() {
 int main(int argc, char *argv[]) {
     // The sudo roast
     if (geteuid() != 0) {
-        printf("\n%s💀 BRO YOU FORGOT SUDO! Do I look like I have root access naturally? Run it again with sudo.%s\n\n", RED, RESET);
+        printf("\n%sRoot access is required. Run with sudo.%s\n\n", RED, RESET);
         return 1;
     }
 
@@ -519,14 +530,14 @@ int main(int argc, char *argv[]) {
     if (interactive) {
         show_sysfs_drives();
 
-        printf("%s[📂 INPUT] Absolute Path to ISO file image:%s\n> ", YELLOW, RESET);
+        printf("%sISO file path%s\n> ", YELLOW, RESET);
         char choice_iso[MAX_PATH];
         if (fgets(choice_iso, sizeof(choice_iso), stdin)) {
             choice_iso[strcspn(choice_iso, "\n")] = 0;
             strncpy(app_config.iso_path, choice_iso, MAX_PATH);
         }
 
-        printf("%s[🔌 TARGET] Target Block Node destination (e.g. /dev/sdc):%s\n> ", YELLOW, RESET);
+        printf("%sUSB device (for example /dev/sdb)%s\n> ", YELLOW, RESET);
         char choice_dev[MAX_PATH];
         if (fgets(choice_dev, sizeof(choice_dev), stdin)) {
             choice_dev[strcspn(choice_dev, "\n")] = 0;
