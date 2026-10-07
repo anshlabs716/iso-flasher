@@ -186,7 +186,7 @@ gcc -o iso-flasher iso-flasher.c
 sudo ./iso-flasher
 ~~~~
 
-The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device.
+The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device. While the ISO is being written, press `Shift+Tab` to switch between the live flash view and a built-in Snake game; flashing continues in the background.
 
 > ⚠️ **Destructive operation:** flashing overwrites the selected device. Verify the target path before confirming.
 
