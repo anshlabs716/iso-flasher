@@ -2,13 +2,13 @@
 
 <div align="center">
 
-### ⚡ A Powerful, No-Bloat ISO-to-USB Flasher
+### ⚡ Fast, Lightweight ISO-to-USB Flasher — Rust Rewrite
 
-**Fast • Lightweight • Written in C**
+**Safe raw-device flashing • Live progress • Snake mode • No bloat**
 
-[![C](https://img.shields.io/badge/C-100%25-A8B9CC?style=for-the-badge&logo=c&logoColor=black)](https://en.wikipedia.org/wiki/C_(programming_language))
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20Termux-1793D1?style=for-the-badge)](https://github.com/anshlabs716/iso-flasher)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://opensource.org/license/mit/)
+[![Rust](https://img.shields.io/badge/Rust-100%25-000000?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
+[![Linux](https://img.shields.io/badge/Linux-primary-1793D1?style=for-the-badge&logo=linux)](https://github.com/anshlabs716/iso-flasher)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://opensource.org/license/mit/)
 
 </div>
 
@@ -18,106 +18,70 @@
 
 ### Prerequisites
 
-On Debian, Ubuntu, MX Linux, and other APT-based distributions:
+For Debian, Ubuntu, MX Linux, and other APT-based systems:
 
 ```bash
 sudo apt update
-sudo apt install -y git cmake gcc
+sudo apt install -y git gcc cmake
 ```
 
-### Installation
+> GCC is required for the legacy/native build tooling and project prerequisites. The application itself is now written in Rust.
 
-Everything you need to clone, compile with GCC, install, and run iso-flasher:
+### Build
 
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
 
-cmake -B build -DCMAKE_C_COMPILER=gcc
-cmake --build build
+# Install Rust if it is not already installed
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-sudo install -m 755 build/iso-flasher /usr/local/bin/iso-flasher
+cargo build --release
+sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
+```
 
+### Run
+
+```bash
 sudo iso-flasher
+```
+
+Or:
+
+```bash
+sudo iso-flasher --iso image.iso --device /dev/sdX
 ```
 
 ### Uninstall
 
 ```bash
 sudo rm /usr/local/bin/iso-flasher
-rm -rf build
+rm -rf target
 ```
 
-> ⚠️ **Destructive operation:** iso-flasher writes directly to the selected block device. Verify the target device before confirming the flash.
-
-
----
-
-## 📖 What is iso-flasher?
-
-**iso-flasher** is a lightweight C-based ISO-to-USB flashing tool currently under active development.
-
-The goal is simple:
-
-> 💿 Flash an ISO.  
-> ⚡ Make it fast.  
-> 🧹 Keep it lightweight.  
-> 🚫 No unnecessary bloat.
-
-The project is still being built, and the terminal interface is currently being refined. Linux USB flashing is functional.
+> ⚠️ **Destructive:** the selected block device is overwritten. Verify it before typing `FLASH`.
 
 ---
 
-## ✨ Planned Features
+## 🦀 Complete Rust Rewrite
 
-### 💿 ISO Flashing
+The old C/CMake implementation has been replaced with a Rust/Cargo implementation.
 
-- ✅ ISO-to-USB raw block flashing
-- ✅ Removable USB drive detection
-- ✅ Drive selection
-- ✅ Live flash progress and transfer speed
-- ✅ Explicit `FLASH` confirmation before destructive writes
-- ✅ ISO/USB size validation
-- ✅ Final `fsync()` and block-device cache flush
-- ✅ Partial-write handling
+Reworked components:
 
-### 🔍 Automatic Detection
-
-iso-flasher is designed to detect the package manager available on the host system.
-
-### 📦 Dependency Handling
-
-Planned support for utilities such as:
-
-- `dd`
-- `lsblk`
-- `pv`
-
-### 🎨 User Experience
-
-- 🌈 Colored output
-- 📋 Clear drive listings
-- ⚡ Lightweight execution
-- 🧹 Minimal dependencies
-
----
-
-## 📦 Supported Package Managers
-
-| Distribution / OS | Package Manager |
-|---|---|
-| 🐧 Debian / Ubuntu | `apt` |
-| 🎩 Fedora / RHEL | `dnf` |
-| 🏔️ Arch / Manjaro | `pacman` |
-| 🦎 openSUSE | `zypper` |
-| 🔲 Void Linux | `xbps` |
-| 🏔️ Alpine Linux | `apk` |
-| 🍎 macOS | `brew` |
-| 😈 FreeBSD | `pkg` |
-| 🧪 Gentoo | `emerge` |
-| 📱 Termux | `pkg` **(Coming Soon)** |
-
-> 🚧 **Termux support is coming soon.** Termux's `pkg` package manager has not been fully integrated or tested yet.
+- 🦀 Rust application core
+- 📦 Cargo build system
+- 💿 Raw ISO-to-USB writing
+- 🔌 Removable USB detection
+- 📏 ISO/device size checks
+- 🛡️ Removable-device safety gate
+- 🔒 Exact `FLASH` confirmation
+- 📊 Live progress, speed, and ETA
+- 💾 Final sync and Linux block-cache flush
+- ⌨️ Ctrl+C cancellation
+- 🐍 Snake mode
+- 🔄 USB refresh
+- 🧹 Direct unmount command without shell interpolation
 
 ---
 
@@ -127,225 +91,98 @@ Planned support for utilities such as:
 |---|---|
 | 🐧 Linux | 🟢 Primary development target |
 | 📱 Termux | 🟡 Coming soon |
-| 🍎 macOS | 🟡 Not tested yet |
-| 😈 BSD | 🟡 Not tested yet |
-| 🪟 Windows | 🔴 Not currently supported AND NEVER WILL BE 🤣️ go switch to linux! |
-
-> **Note:** macOS and BSD have not been tested yet. Compatibility may change as development continues.
+| 🍎 macOS | 🔴 Not supported by current Linux block-device backend |
+| 😈 BSD | 🟡 Not tested |
+| 🪟 Windows | 🔴 Not currently supported AND NEVER WILL BE 🤣 go switch to Linux! |
 
 ---
 
-## 🛠️ Requirements
+## 🎮 Controls
 
-Currently, development requires:
-
-- A C compiler such as `gcc` or `clang`
-- A supported Unix-like operating system
-
-Check your compiler:
-
-~~~~bash
-gcc --version
-~~~~
-
-or:
-
-~~~~bash
-clang --version
-~~~~
-
-### 📱 Termux
-
-**Termux support is coming soon.**
-
-The project has not been fully adapted or tested for Termux yet.
+| Control | Action |
+|---|---|
+| WASD | Move Snake |
+| Arrow keys | Move Snake |
+| Shift+Tab | Switch Snake / flash view |
+| Ctrl+C | Cancel |
+| R | Refresh USB dashboard at the input screen |
 
 ---
 
+## 🔐 Safety
+
+Before flashing, iso-flasher:
+
+1. Requires root.
+2. Verifies the ISO is a regular file.
+3. Requires a direct `/dev/<device>` target.
+4. Checks target capacity.
+5. Blocks non-removable targets unless `--force` is supplied.
+6. Requires the exact word `FLASH`.
+7. Attempts to unmount the target.
+8. Writes directly to the block device.
+9. Syncs the output before success.
+
+**Never guess the target device. A wrong device can destroy data.**
 
 ---
 
-## 🖥️ GUI
+## 🧰 CLI
 
-A graphical interface is also planned.
-
-### 🚧 GUI COMING SOON
-
-The future GUI is intended to make selecting ISO files, choosing USB drives, monitoring progress, and managing the flashing process easier.
-
-~~~~text
-┌─────────────────────────────┐
-│        💿 iso-flasher       │
-├─────────────────────────────┤
-│                             │
-│  ISO File                   │
-│  [ Select ISO... ]          │
-│                             │
-│  USB Drive                  │
-│  [ Select Drive... ]        │
-│                             │
-│  ┌───────────────────────┐  │
-│  │     FLASH ISO         │  │
-│  └───────────────────────┘  │
-│                             │
-│  Progress: ███████░░░ 70%   │
-└─────────────────────────────┘
-~~~~
+```text
+sudo iso-flasher
+sudo iso-flasher --iso <image.iso> --device <device>
+sudo iso-flasher --iso <image.iso> --device <device> --force
+sudo iso-flasher --help
+```
 
 ---
 
-## 📁 Project Structure
+## 📦 Project Structure
 
-~~~~text
+```text
 iso-flasher/
-├── iso-flasher.c
+├── Cargo.toml
+├── src/
+│   └── main.rs
+├── .github/
+│   └── workflows/
+│       └── rust.yml
 ├── .gitignore
 ├── LICENSE
 ├── README.md
 └── SECURITY.md
-~~~~
+```
 
 ---
 
-## 🧩 Development Status
+## 🛠️ Development
 
-| Component | Status |
-|---|---|
-| C foundation | 🟢 In development |
-| CLI interface | 🟡 In development |
-| ISO handling | 🟡 In development |
-| USB detection | 🟢 Implemented |
-| USB flashing | 🟢 Implemented on Linux |
-| Progress reporting | 🟢 Implemented |
-| GUI | 🟡 Coming soon |
-| Termux support | 🟡 Coming soon |
-| Termux `pkg` support | 🟡 Coming soon |
-| Linux testing | 🟢 Primary target |
-| macOS testing | ⚪ Not tested |
-| BSD testing | ⚪ Not tested |
-
----
-
-## 🗺️ Roadmap
-
-- [x] Project foundation
-- [ ] Complete core ISO handling
-- [x] Implement USB detection
-- [x] Implement USB flashing
-- [x] Add confirmation system
-- [x] Add progress reporting
-- [x] Improve error handling
-- [ ] Expand Linux support
-- [ ] Add Termux support
-- [ ] Add Termux `pkg` support
-- [ ] Test macOS
-- [ ] Test BSD
-- [ ] Build GUI
-- [ ] Test across supported systems
-- [ ] First stable release
-
----
-
-## 🛡️ Safety
-
-iso-flasher works directly with storage devices.
-
-**Always verify the selected drive before writing an ISO.**
-
-Selecting the wrong drive can result in data loss.
-
----
-
-## 🐛 Bug Reports
-
-Found a bug or have an idea?
-
-When opening an issue, include:
-
-- Operating system
-- Distribution/version
-- C compiler and version
-- Package manager
-- What you were doing
-- What happened
-- Any terminal output or errors
-
-If you're testing on **macOS, BSD, or Termux**, please mention it since these platforms are not fully tested yet.
+```bash
+cargo check
+cargo fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release
+```
 
 ---
 
 ## 🤝 Contributing
 
-Contributions, ideas, testing, and improvements are welcome.
-
-Especially useful right now:
-
-- 🐧 Linux testing
-- 📱 Termux testing once support is available
-- 🍎 macOS testing
-- 😈 BSD testing
-- 💻 C development
-- 🖥️ GUI development
-
-To contribute:
-
-1. Fork the repository
-2. Create a branch
-3. Make your changes
-4. Test your changes
-5. Commit your work
-6. Push your branch
-7. Open a Pull Request
-
----
-
-## 🔐 Security
-
-Please see [`SECURITY.md`](SECURITY.md) for security information and vulnerability reporting.
-
-If you discover a security issue, please report it responsibly.
+Rust development, Linux testing, USB compatibility testing, safety testing, UI improvements, and future Termux work are welcome.
 
 ---
 
 ## 📜 License
 
-iso-flasher is licensed under the **MIT License**.
-
-See [`LICENSE`](LICENSE) for the complete license text.
-
----
-
-## 👨‍💻 Author
-
-**Ansh Bhatia — AnshLabs716**
-
-Built with C and a hatred for unnecessary bloat. 🔥
-
----
-
-## ⭐ Support
-
-If you find iso-flasher useful:
-
-- ⭐ Star the repository
-- 🐛 Report bugs
-- 💡 Suggest features
-- 🔧 Contribute improvements
-- 🖥️ Help test the upcoming GUI
-- 📱 Help test future Termux support
+iso-flasher is licensed under the MIT License.
 
 ---
 
 <div align="center">
 
-# 💿 iso-flasher
+### 🦀 Rust rewrite • 🐧 Linux USB flashing • 🐍 Snake mode
 
-### ⚡ No bloat. No fluff. Just ISO flashing.
-
-**⚡ Linux USB flashing is functional • GUI still planned**
-
-**🖥️ GUI coming soon • 📱 Termux support coming soon**
-
-**🍎 macOS & 😈 BSD not tested yet**
+**No bloat. No fluff. Just ISO flashing.**
 
 </div>

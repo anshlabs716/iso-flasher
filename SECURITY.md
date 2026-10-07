@@ -1,21 +1,18 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+| Version | Supported |
+|---|---|
+| 2.x | Yes |
+| < 2.0 | No |
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+## Reporting
 
-## Reporting a Vulnerability
+Please report security issues privately through GitHub's security reporting tools.
 
-Use this section to tell people how to report a vulnerability.
+Include the affected version, Linux distribution/kernel, Rust version, reproduction steps, and relevant error output. Do not include passwords, tokens, private keys, or personal data.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+## Safety
+
+iso-flasher writes directly to block devices. Always verify the target device before confirming a flash.

@@ -1,0 +1,10 @@
+[package]
+name = "iso-flasher"
+version = "2.0.0"
+edition = "2021"
+description = "Fast, lightweight, no-bloat ISO-to-USB flasher"
+license = "MIT"
+
+[[bin]]
+name = "iso-flasher"
+path = "src/main.rs"
