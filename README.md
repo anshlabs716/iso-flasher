@@ -43,7 +43,7 @@
 
 ## 🚧 STILL IN DEVELOPMENT 🚧
 
-**iso-flasher is currently in development and cannot flash USB drives yet.**
+**iso-flasher can now write bootable ISO images directly to USB block devices on Linux.**
 
 **GUI coming soon • Termux support coming soon**
 
@@ -73,11 +73,14 @@ The project is still being built, so **USB flashing is not functional yet**. Fea
 
 ### 💿 ISO Flashing
 
-- 🚧 ISO-to-USB flashing
-- 🚧 USB drive detection
-- 🚧 Drive selection
-- 🚧 Flash progress
-- 🚧 Confirmation before writing
+- ✅ ISO-to-USB raw block flashing
+- ✅ Removable USB drive detection
+- ✅ Drive selection
+- ✅ Live flash progress and transfer speed
+- ✅ Explicit `FLASH` confirmation before destructive writes
+- ✅ ISO/USB size validation
+- ✅ Final `fsync()` and block-device cache flush
+- ✅ Partial-write handling
 
 ### 🔍 Automatic Detection
 
@@ -180,10 +183,12 @@ gcc -o iso-flasher iso-flasher.c
 ### 3. Run
 
 ~~~~bash
-./iso-flasher
+sudo ./iso-flasher
 ~~~~
 
-> ⚠️ **Development notice:** The current build cannot flash USB drives yet. The USB flashing functionality is still being implemented.
+The interactive mode lists removable block devices, asks for an ISO and target device, requires typing `FLASH`, unmounts the target, then writes the ISO directly to the selected device.
+
+> ⚠️ **Destructive operation:** flashing overwrites the selected device. Verify the target path before confirming.
 
 ---
 
@@ -236,9 +241,9 @@ iso-flasher/
 | C foundation | 🟢 In development |
 | CLI interface | 🟡 In development |
 | ISO handling | 🟡 In development |
-| USB detection | 🔴 Not implemented yet |
-| USB flashing | 🔴 Not implemented yet |
-| Progress reporting | 🔴 Planned |
+| USB detection | 🟢 Implemented |
+| USB flashing | 🟢 Implemented on Linux |
+| Progress reporting | 🟢 Implemented |
 | GUI | 🟡 Coming soon |
 | Termux support | 🟡 Coming soon |
 | Termux `pkg` support | 🟡 Coming soon |
@@ -252,11 +257,11 @@ iso-flasher/
 
 - [x] Project foundation
 - [ ] Complete core ISO handling
-- [ ] Implement USB detection
-- [ ] Implement USB flashing
-- [ ] Add confirmation system
-- [ ] Add progress reporting
-- [ ] Improve error handling
+- [x] Implement USB detection
+- [x] Implement USB flashing
+- [x] Add confirmation system
+- [x] Add progress reporting
+- [x] Improve error handling
 - [ ] Expand Linux support
 - [ ] Add Termux support
 - [ ] Add Termux `pkg` support
@@ -364,7 +369,7 @@ If you find iso-flasher useful:
 
 ### ⚡ No bloat. No fluff. Just ISO flashing.
 
-**🚧 In Development • USB flashing not available yet**
+**⚡ Linux USB flashing is functional • GUI still planned**
 
 **🖥️ GUI coming soon • 📱 Termux support coming soon**
 
