@@ -28,7 +28,43 @@ fn dev_size(p:&str)->io::Result<u64>{let f=OpenOptions::new().read(true).open(p)
 fn devices()->Vec<(String,u64)>{let mut v=vec![];if let Ok(es)=fs::read_dir("/sys/block"){for e in es.flatten(){let n=e.file_name().to_string_lossy().into_owned();if ["loop","ram","zram","dm-"].iter().any(|p|n.starts_with(p)){continue}if removable(&n){let p=format!("/dev/{n}");if let Ok(s)=dev_size(&p){v.push((p,s))}}}}v.sort();v}
 fn usb(){println!("{MA}┌─ USB DEVICES ─────────────────────────────────────────────────────────┐{X}");let d=devices();if d.is_empty(){println!("{MA}│{X} No removable USB drives detected.");}else{for(i,(p,s))in d.iter().enumerate(){println!("{MA}│{X} {:>2}. {:<22} {:>7.2} GB",i+1,p,*s as f64/1e9)}}println!("{MA}│{X} Press {GR}[R]{X} to refresh.");println!("{MA}└───────────────────────────────────────────────────────────────────────┘{X}\n")}
 fn input(p:&str)->io::Result<String>{print!("{p}");io::stdout().flush()?;let mut s=String::new();io::stdin().read_line(&mut s)?;Ok(s.trim().into())}
-fn interactive()->io::Result<(String,String)>{loop{banner();profile();usb();let iso=input(&format!("{YE}ISO IMAGE{X} > "))?;if iso.is_empty()||iso.eq_ignore_ascii_case("r"){continue}let dev=input(&format!("{GR}TARGET DEVICE{X} > "))?;if dev.is_empty()||dev.eq_ignore_ascii_case("r"){continue}return Ok((iso,dev))}}
+fn is_iso(p:&std::path::Path)->bool{p.is_file()&&p.extension().and_then(|x|x.to_str()).map(|x|x.eq_ignore_ascii_case("iso")).unwrap_or(false)}
+fn scan_isos()->Vec<String>{
+ let mut found=Vec::new();let mut stack=vec![std::path::PathBuf::from("/")];
+ while let Some(dir)=stack.pop(){
+  if matches!(dir.to_str(),Some("/proc")|Some("/sys")|Some("/dev")|Some("/run")){continue}
+  let entries=match fs::read_dir(&dir){Ok(x)=>x,Err(_)=>continue};
+  for e in entries.flatten(){let p=e.path();if p.is_dir(){stack.push(p)}else if is_iso(&p){found.push(p.display().to_string())}}
+ }
+ found.sort_by_key(|p|p.to_lowercase());found.dedup();found
+}
+fn iso_picker()->io::Result<String>{
+ let _term=Terminal::raw()?;let mut selected=0usize;let mut scroll=0usize;let visible=12usize;
+ loop{
+  clear();println!("{CY}{BO}ISO IMAGE SELECTOR{X}\n");println!("{YE}Scanning the filesystem for .iso files...{X}");io::stdout().flush()?;
+  let isos=scan_isos();
+  loop{
+   clear();println!("{CY}{BO}ISO IMAGE SELECTOR{X}\n");
+   if isos.is_empty(){println!("{RE}No ISO files found.{X}\n");println!("{YE}Press {BO}Tab{X} to scan again or {BO}Esc{X} to cancel.");}
+   else{
+    let end=(scroll+visible).min(isos.len());println!("Found {} ISO file{}:\n",isos.len(),if isos.len()==1{""}else{"s"});
+    for i in scroll..end{if i==selected{println!("{GR}{BO}  > {}{X}",isos[i])}else{println!("    {}",isos[i])}}
+    println!("\n{YE}↑/↓{X} Browse   {YE}Enter{X} Select   {YE}Tab{X} Scan again   {YE}Esc{X} Cancel");
+   }
+   io::stdout().flush()?;
+   loop{
+    let k=loop{if let Some(k)=key(){break k}std::thread::sleep(Duration::from_millis(10))};
+    match k{
+     9=>{selected=0;scroll=0;break},
+     0x1b=>{if key()==Some(b'['){match key(){Some(b'A')=>{if selected>0{selected-=1;if selected<scroll{scroll=selected}}},Some(b'B')=>{if selected+1<isos.len(){selected+=1;if selected>=scroll+visible{scroll=selected-visible+1}}},_=>{}}}else{return Err(io::Error::new(io::ErrorKind::Interrupted,"ISO selection cancelled"))}},
+     10|13=>{if let Some(p)=isos.get(selected){return Ok(p.clone())}},
+     _=>{}
+    }
+   }
+  }
+ }
+}
+fn interactive()->io::Result<(String,String)>{loop{banner();profile();usb();println!("{CY}{BO}Select an ISO image:{X}");let iso=iso_picker()?;let dev=input(&format!("{GR}TARGET DEVICE{X} > "))?;if dev.is_empty()||dev.eq_ignore_ascii_case("r"){continue}return Ok((iso,dev))}}
 fn args()->(Option<String>,Option<String>,bool){let a:Vec<_>=env::args().skip(1).collect();let(mut i,mut d,mut f)=(None,None,false);let mut n=0;while n<a.len(){match a[n].as_str(){"-i"|"--iso"=>{n+=1;if n<a.len(){i=Some(a[n].clone())}},"-d"|"--device"=>{n+=1;if n<a.len(){d=Some(a[n].clone())}},"-f"|"--force"=>f=true,"-h"|"--help"=>{println!("iso-flasher 2.0.0\n\nUsage: sudo iso-flasher [--iso IMAGE --device /dev/sdX] [--force]");std::process::exit(0)},x=>eprintln!("{YE}Ignoring unknown argument: {x}{X}")}n+=1}(i,d,f)}
 fn validate(iso:&str,dev:&str,force:bool)->io::Result<u64>{let m=fs::metadata(iso)?;if !m.is_file(){return Err(io::Error::new(io::ErrorKind::InvalidInput,"ISO is not a regular file"))}if !dev.starts_with("/dev/")||dev[5..].contains('/'){return Err(io::Error::new(io::ErrorKind::InvalidInput,"target must be /dev/<device>"))}if !force&&!removable(&dev[5..]){return Err(io::Error::new(io::ErrorKind::PermissionDenied,"target is not removable; use --force only after verifying it"))}let s=dev_size(dev)?;if s>0&&m.len()>s{return Err(io::Error::new(io::ErrorKind::InvalidInput,"target is smaller than ISO"))}Ok(m.len())}
 fn key()->Option<u8>{let mut p=PollFd{fd:io::stdin().as_raw_fd(),events:POLLIN,revents:0};if unsafe{poll(&mut p,1,0)}<=0||p.revents&POLLIN==0{return None}let mut b=[0];if unsafe{read(p.fd,b.as_mut_ptr(),1)}==1{Some(b[0])}else{None}}
