@@ -22,20 +22,16 @@ For Debian, Ubuntu, MX Linux, and other APT-based systems:
 
 ```bash
 sudo apt update
-sudo apt install -y git gcc cmake
+sudo apt install -y git gcc rustc cargo
 ```
 
-> GCC is required for the legacy/native build tooling and project prerequisites. The application itself is now written in Rust.
+> GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo are installed directly from the distro packages here, so no CMake or rustup setup is required.
 
 ### Build
 
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
-
-# Install Rust if it is not already installed
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
 cargo build --release
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
 ```
