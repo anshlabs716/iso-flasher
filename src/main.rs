@@ -892,6 +892,7 @@ fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
             println!("Speed   {:>7.1} MiB/s", speed);
             println!("ETA     {:02}m {:02}s", (eta as u64) / 60, (eta as u64) % 60);
             println!("\n{YELLOW}Shift+Tab{RESET} Snake    Ctrl+C Cancel");
+            println!("{YELLOW}Press Ctrl+C to cancel the flash at any time.{RESET}");
         }
 
         io::stdout().flush()?;
