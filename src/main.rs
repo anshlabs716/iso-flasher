@@ -26,7 +26,6 @@ const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 const RED: &str = "\x1b[31m";
 const MAGENTA: &str = "\x1b[35m";
-const BLUE: &str = "\x1b[34m";
 
 const SIGINT: i32 = 2;
 const POLLIN: i16 = 1;
@@ -167,59 +166,6 @@ impl Drop for TerminalGuard {
 
 fn clear_screen() {
     print!("\x1b[2J\x1b[3J\x1b[H");
-}
-
-fn print_banner() {
-    clear_screen();
-    println!("{CYAN}{BOLD}");
-    println!(" █    ██  ██████  ██████▄  ███▄ ▄███▓ ▄▄▄       ██ ▄█▀▓█████  ██▀███");
-    println!(" ██  ▓██▒▒██    ▒ ▓██   ▀█ ▓██▒▀█▀ ██▒▒████▄     ██▄█▒ ▓█   ▀ ▓██ ▒ ██▒");
-    println!(" ▓██  ▒██░░ ▓██▄   ▓██▀▀▀▄▄ ▓██    ▓██░▒██  ▀█▄  ▓███▄░ ▒███   ▓██ ░▄█ ▒");
-    println!(" ▓▓█  ░██░  ▒   ██▒▓██    █ ▒██    ▒██ ░██▄▄▄▄██ ▓██ █▄ ▒▓█  ▄ ▒██▀▀█▄");
-    println!(" ▒▒█████▓ ▒██████▒▒▒██████▀ ▒██▒   ░██▒  ▓█   ▓██▒▒██▒ █▄░▒████▒░██▓ ▒██▒");
-    println!("  ░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░▒ ▒ ▒  ░░ ▒░   ░  ░  ▒▒   ▓▒█░▒ ▒▒ ▓▒░░ ▒░ ░░ ▒▓ ░▒▓░");
-    println!("  ░░▒░ ░ ░ ░ ░▒  ░ ░░ ░ ░ ░ ░  ░      ░   ▒   ▒▒ ░░ ░▒ ▒░ ░ ░  ░  ░▒ ░ ▒░");
-    println!("   ░░░ ░ ░ ░  ░  ░  ░ ░ ░   ░      ░      ░   ▒   ░ ░░ ░    ░     ░░   ░");
-    println!("     ░           ░  ░       ░             ░  ░░ ░  ░      ░  ░   ░");
-    println!("                            ░{RESET}");
-    println!("{MAGENTA}{BOLD}⚡ RAW CORE ENGINE // RUST v2.0.0 ⚡{RESET}\n");
-}
-
-fn memory_usage() -> (f64, f64) {
-    let text = fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let mut total = 0_u64;
-    let mut available = 0_u64;
-
-    for line in text.lines() {
-        let mut fields = line.split_whitespace();
-        match fields.next() {
-            Some("MemTotal:") => total = fields.next().and_then(|v| v.parse().ok()).unwrap_or(0),
-            Some("MemAvailable:") => {
-                available = fields.next().and_then(|v| v.parse().ok()).unwrap_or(0)
-            }
-            _ => {}
-        }
-    }
-
-    (
-        (total.saturating_sub(available)) as f64 / 1_048_576.0,
-        total as f64 / 1_048_576.0,
-    )
-}
-
-fn print_system_profile() {
-    let (used, total) = memory_usage();
-    let load = fs::read_to_string("/proc/loadavg")
-        .ok()
-        .and_then(|value| value.split_whitespace().next().map(str::to_owned))
-        .unwrap_or_else(|| "?".to_owned());
-
-    println!("{BLUE}┌─ SYSTEM ──────────────────────────────────────────────────────────────┐{RESET}");
-    println!(
-        "{BLUE}│{RESET} RAM {:>5.1} / {:<5.1} GB     Load {:<6}                         {BLUE}│{RESET}",
-        used, total, load
-    );
-    println!("{BLUE}└───────────────────────────────────────────────────────────────────────┘{RESET}\n");
 }
 
 fn is_removable(name: &str) -> bool {
