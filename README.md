@@ -51,11 +51,12 @@ sudo iso-flasher --iso image.iso --device /dev/sdX
 ### Uninstall
 
 ```bash
-sudo rm /usr/local/bin/iso-flasher
-rm -rf target
+sudo rm -f /usr/local/bin/iso-flasher
 ```
 
-> ⚠️ **Destructive:** the selected block device is overwritten. Verify it before typing `FLASH`.
+```bash
+rm -rf iso-flasher
+```
 
 ---
 
@@ -110,7 +111,7 @@ Reworked components:
 | Ctrl+C | Cancel |
 | R | Refresh USB dashboard at the input screen |
 
-When run without `--iso`, iso-flasher automatically scans the filesystem for `.iso` files and presents them in an interactive browser. No manual ISO path entry is required. Virtual filesystems such as `/proc`, `/sys`, `/dev`, and `/run` are skipped during the scan.
+When run without `--iso`, iso-flasher automatically scans the entire filesystem for `.iso` files and presents them in an interactive browser. Use **↑ / ↓** to browse the results, **Enter** to select an ISO, and **Tab** to scan the filesystem again. No manual ISO path entry is required. Virtual filesystems such as `/proc`, `/sys`, `/dev`, and `/run` are skipped during the scan.
 
 ---
 
