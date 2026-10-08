@@ -265,31 +265,86 @@ fn removable_devices() -> io::Result<Vec<(PathBuf, u64)>> {
     Ok(devices)
 }
 
-fn print_usb_devices() {
-    println!("{MAGENTA}┌─ USB DEVICES ─────────────────────────────────────────────────────────┐{RESET}");
+fn usb_picker() -> io::Result<PathBuf> {
+    let _terminal = TerminalGuard::raw()?;
+    let mut selected = 0usize;
 
-    match removable_devices() {
-        Ok(devices) if devices.is_empty() => {
-            println!("{MAGENTA}│{RESET} No removable USB drives detected.");
-        }
-        Ok(devices) => {
+    loop {
+        let devices = removable_devices()?;
+
+        clear_screen();
+        println!("{MAGENTA}{BOLD}USB TARGET SELECTOR{RESET}\n");
+
+        if devices.is_empty() {
+            println!("{RED}No removable USB drives detected.{RESET}\n");
+            println!("{YELLOW}[R]{RESET} Refresh    {YELLOW}[Esc]{RESET} Cancel");
+        } else {
             for (index, (path, size)) in devices.iter().enumerate() {
-                println!(
-                    "{MAGENTA}│{RESET} {:>2}. {:<22} {:>7.2} GB",
-                    index + 1,
-                    path.display(),
-                    *size as f64 / 1e9
-                );
+                if index == selected {
+                    println!(
+                        "{GREEN}{BOLD}  > {}{RESET}  {:>7.2} GB",
+                        path.display(),
+                        *size as f64 / 1e9
+                    );
+                } else {
+                    println!("    {}  {:>7.2} GB", path.display(), *size as f64 / 1e9);
+                }
+            }
+
+            if selected >= devices.len() {
+                selected = devices.len().saturating_sub(1);
+            }
+
+            println!(
+                "\n{YELLOW}↑/↓{RESET} Browse   {YELLOW}Enter{RESET} Select   {YELLOW}R{RESET} Refresh   {YELLOW}Esc{RESET} Cancel"
+            );
+            println!(
+                "{CYAN}USB target {} of {}{RESET}",
+                selected + 1,
+                devices.len()
+            );
+        }
+
+        io::stdout().flush()?;
+
+        loop {
+            if let Some(key) = read_key() {
+                match key {
+                    b'r' | b'R' => break,
+                    10 | 13 => {
+                        if let Some((path, _)) = devices.get(selected) {
+                            return Ok(path.clone());
+                        }
+                    }
+                    0x1b => {
+                        if let Some(direction) = arrow_key() {
+                            match direction {
+                                b'A' if selected > 0 => {
+                                    selected -= 1;
+                                    break;
+                                }
+                                b'B' if selected + 1 < devices.len() => {
+                                    selected += 1;
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                "USB selection cancelled",
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
-        Err(error) => {
-            println!("{MAGENTA}│{RESET} Unable to enumerate USB devices: {error}");
-        }
     }
-
-    println!("{MAGENTA}│{RESET} Press {GREEN}[R]{RESET} to refresh.");
-    println!("{MAGENTA}└───────────────────────────────────────────────────────────────────────┘{RESET}\n");
 }
+
 
 fn prompt(message: &str) -> io::Result<String> {
     print!("{message}");
@@ -309,17 +364,28 @@ fn is_iso(path: &Path) -> bool {
 }
 
 fn scan_directories() -> io::Result<Vec<PathBuf>> {
+    // Only scan real user data under /home. Do not enumerate the Linux
+    // filesystem root, system partitions, /proc, /sys, /dev, /run, etc.
+    let home = Path::new("/home");
     let mut directories = Vec::new();
-    let mut pending = vec![PathBuf::from("/")];
+    let mut pending = Vec::new();
+
+    if !home.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "/home does not exist",
+        ));
+    }
+
+    for entry in fs::read_dir(home)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            pending.push(path);
+        }
+    }
 
     while let Some(directory) = pending.pop() {
-        if matches!(
-            directory.to_str(),
-            Some("/proc") | Some("/sys") | Some("/dev") | Some("/run")
-        ) {
-            continue;
-        }
-
         directories.push(directory.clone());
 
         let entries = match fs::read_dir(&directory) {
@@ -328,9 +394,10 @@ fn scan_directories() -> io::Result<Vec<PathBuf>> {
         };
 
         for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
+                    pending.push(entry.path());
+                }
             }
         }
     }
@@ -594,22 +661,15 @@ fn iso_picker() -> io::Result<PathBuf> {
 }
 
 fn interactive() -> io::Result<(PathBuf, PathBuf)> {
-    loop {
-        print_banner();
-        print_system_profile();
-        print_usb_devices();
+    // 1. Pick the USB target first.
+    let device = usb_picker()?;
 
-        println!("{CYAN}{BOLD}Select an ISO image:{RESET}");
-        let iso = iso_picker()?;
-        let device = prompt(&format!("{GREEN}TARGET DEVICE{RESET} > "))?;
+    // 2. Only after the USB is selected, scan /home for user directories.
+    let iso = iso_picker()?;
 
-        if device.is_empty() || device.eq_ignore_ascii_case("r") {
-            continue;
-        }
-
-        return Ok((iso, PathBuf::from(device)));
-    }
+    Ok((iso, device))
 }
+
 
 #[derive(Default)]
 struct Cli {
