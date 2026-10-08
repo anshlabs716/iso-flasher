@@ -2,15 +2,13 @@
 
 <div align="center">
 
-### ⚡ Fast, Lightweight ISO-to-USB Flasher
+### ⚡ Fast, Lightweight ISO-to-USB Flasher — Rust Rewrite
 
-A small Rust utility for writing ISO images directly to USB devices on Linux.
+**Safe raw-device flashing • Live progress • Snake mode • No bloat**
 
-**Simple file picking • Live progress • Snake mode • Safety checks • No bloat**
-
-[![Rust](https://img.shields.io/badge/Rust-2021-black?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
-[![Linux](https://img.shields.io/badge/Linux-supported-1793D1?style=for-the-badge&logo=linux)](https://www.kernel.org/)
-[![License](https://img.shields.io/github/license/anshlabs716/iso-flasher?style=for-the-badge)](https://github.com/anshlabs716/iso-flasher/blob/main/LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-100%25-000000?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
+[![Linux](https://img.shields.io/badge/Linux-primary-1793D1?style=for-the-badge&logo=linux)](https://github.com/anshlabs716/iso-flasher)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://opensource.org/license/mit/)
 
 </div>
 
@@ -20,72 +18,64 @@ A small Rust utility for writing ISO images directly to USB devices on Linux.
 
 ### 1. Install prerequisites
 
-For Debian, Ubuntu, MX Linux, and other APT-based systems:
+For Debian, Ubuntu, MX Linux, and other APT-based systems, install everything needed to build iso-flasher:
 
 ```bash
 sudo apt update
 sudo apt install -y git gcc rustc cargo
 ```
 
-GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo come from the distro packages.
+> GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo are installed directly from the distro packages. No CMake or rustup setup is required.
 
-### 2. Build and install
+### 2. Install and run iso-flasher
 
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
 cargo build --release
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
-```
-
-Run it with:
-
-```bash
 sudo iso-flasher
 ```
 
 ### Uninstall
 
+Remove the installed binary:
+
 ```bash
 sudo rm -f /usr/local/bin/iso-flasher
+```
+
+Remove the cloned project separately:
+
+```bash
 rm -rf iso-flasher
 ```
 
 ---
 
-## 🖥️ How it works
+## 🦀 Complete Rust Rewrite
 
-The interactive flow is intentionally simple:
+The old C/CMake implementation has been replaced with a Rust/Cargo implementation.
 
-**Title screen → Select USB → Select ISO → Confirm → Flash**
+Reworked components:
 
-1. iso-flasher opens your desktop file picker for the USB target.
-2. Select the **whole USB device**, such as `/dev/sdb`.
-3. The file picker opens again for the ISO image.
-4. Confirm the destructive operation by typing `FLASH`.
-5. iso-flasher unmounts the USB partitions and starts flashing.
-6. Live progress, speed, and ETA are shown while the image is written.
-7. Switch to Snake mode while flashing if you want.
-
-On KDE, iso-flasher uses **KDialog**. If KDialog is unavailable, it falls back to **Zenity**.
-
-> Do not select a partition such as `/dev/sdb1`. Select the whole device.
-
----
-
-## 🦀 Features
-
-- ⚡ Fast raw-device flashing
-- 📁 Native desktop file picker for USB and ISO selection
-- 📊 Live progress, speed, and ETA
-- 🛡️ Removable-device safety gate
+- 🦀 Rust application core
+- 📦 Cargo build system
+- 💿 Raw ISO-to-USB writing
+- 🔌 Removable USB detection
 - 📏 ISO/device size checks
+- 🛡️ Removable-device safety gate
 - 🔒 Exact `FLASH` confirmation
+- 📊 Live progress, speed, and ETA
 - 💾 Final sync and Linux block-cache flush
-- 🐍 Snake mode while flashing
-- ⌨️ Keyboard-friendly controls
-- 🦀 Written entirely in Rust
-- 🚫 No unnecessary dependencies or bloat
+- ⌨️ Ctrl+C cancellation
+- 🐍 Snake mode
+- 🔄 USB refresh
+- 🔎 Directory-based ISO discovery
+- 📁 Interactive directory picker
+- ⬆️⬇️ Arrow-key ISO browser
+- 🔁 Tab-to-choose-another-directory
+- 🧹 Direct unmount command without shell interpolation
 
 ---
 
@@ -93,10 +83,11 @@ On KDE, iso-flasher uses **KDialog**. If KDialog is unavailable, it falls back t
 
 | Platform | Status |
 |---|---|
-| 🐧 Linux | 🟢 Primary target |
-| 🍎 macOS | 🔴 Not supported by the current Linux block-device backend |
+| 🐧 Linux | 🟢 Primary development target |
+| 📱 Termux | 🟡 Coming soon |
+| 🍎 macOS | 🔴 Not supported by current Linux block-device backend |
 | 😈 BSD | 🟡 Not tested |
-| 🪟 Windows | 🔴 Not currently supported |
+| 🪟 Windows | 🔴 Not currently supported AND NEVER WILL BE 🤣 go switch to Linux! |
 
 ---
 
@@ -104,10 +95,17 @@ On KDE, iso-flasher uses **KDialog**. If KDialog is unavailable, it falls back t
 
 | Control | Action |
 |---|---|
+| ↑ / ↓ | Browse directories and ISO files |
+| Enter | Select directory or ISO |
+| Tab | Choose another directory while browsing ISO results |
+| Esc | Cancel ISO selection |
 | WASD | Move Snake |
 | Arrow keys | Move Snake |
 | Shift+Tab | Switch Snake / flash view |
 | Ctrl+C | Cancel |
+| R | Refresh USB dashboard at the input screen |
+
+When run without `--iso`, iso-flasher first lets you choose which directory to scan. Use **↑ / ↓** to browse directories and **Enter** to scan the selected directory. The scan recursively searches only that directory for `.iso` files and shows the live number of images found. Press **Tab** to choose another directory or **Esc** to cancel. No manual ISO path entry is required.
 
 ---
 
@@ -118,13 +116,12 @@ Before flashing, iso-flasher:
 1. Requires root.
 2. Verifies the ISO is a regular file.
 3. Requires a direct `/dev/<device>` target.
-4. Rejects partitions in the interactive USB picker.
-5. Checks target capacity.
-6. Blocks non-removable targets unless `--force` is supplied.
-7. Requires the exact word `FLASH`.
-8. Attempts to unmount the target and its partitions.
-9. Writes directly to the block device.
-10. Syncs the output before success.
+4. Checks target capacity.
+5. Blocks non-removable targets unless `--force` is supplied.
+6. Requires the exact word `FLASH`.
+7. Attempts to unmount the target.
+8. Writes directly to the block device.
+9. Syncs the output before success.
 
 **Never guess the target device. A wrong device can destroy data.**
 
@@ -172,7 +169,7 @@ cargo build --release
 
 ## 🤝 Contributing
 
-Bug fixes, Linux testing, USB compatibility testing, safety improvements, and UI improvements are welcome.
+Rust development, Linux testing, USB compatibility testing, safety testing, UI improvements, and future Termux work are welcome.
 
 ---
 
@@ -180,9 +177,11 @@ Bug fixes, Linux testing, USB compatibility testing, safety improvements, and UI
 
 iso-flasher is licensed under the MIT License.
 
+---
+
 <div align="center">
 
-### 🦀 Rust • 🐧 Linux • 💿 USB flashing • 🐍 Snake mode
+### 🦀 Rust rewrite • 🐧 Linux USB flashing • 🐍 Snake mode
 
 **No bloat. No fluff. Just ISO flashing.**
 
