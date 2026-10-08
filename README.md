@@ -77,6 +77,9 @@ Reworked components:
 - ⌨️ Ctrl+C cancellation
 - 🐍 Snake mode
 - 🔄 USB refresh
+- 🔎 Full-filesystem ISO discovery
+- ⬆️⬇️ Arrow-key ISO browser
+- 🔁 Tab-to-rescan ISO search
 - 🧹 Direct unmount command without shell interpolation
 
 ---
@@ -97,11 +100,17 @@ Reworked components:
 
 | Control | Action |
 |---|---|
+| ↑ / ↓ | Browse discovered ISO files |
+| Enter | Select ISO |
+| Tab | Scan the filesystem for ISO files again |
+| Esc | Cancel ISO selection |
 | WASD | Move Snake |
 | Arrow keys | Move Snake |
 | Shift+Tab | Switch Snake / flash view |
 | Ctrl+C | Cancel |
 | R | Refresh USB dashboard at the input screen |
+
+When run without `--iso`, iso-flasher automatically scans the filesystem for `.iso` files and presents them in an interactive browser. No manual ISO path entry is required. Virtual filesystems such as `/proc`, `/sys`, `/dev`, and `/run` are skipped during the scan.
 
 ---
 
