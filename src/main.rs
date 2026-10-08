@@ -29,20 +29,32 @@ fn devices()->Vec<(String,u64)>{let mut v=vec![];if let Ok(es)=fs::read_dir("/sy
 fn usb(){println!("{MA}┌─ USB DEVICES ─────────────────────────────────────────────────────────┐{X}");let d=devices();if d.is_empty(){println!("{MA}│{X} No removable USB drives detected.");}else{for(i,(p,s))in d.iter().enumerate(){println!("{MA}│{X} {:>2}. {:<22} {:>7.2} GB",i+1,p,*s as f64/1e9)}}println!("{MA}│{X} Press {GR}[R]{X} to refresh.");println!("{MA}└───────────────────────────────────────────────────────────────────────┘{X}\n")}
 fn input(p:&str)->io::Result<String>{print!("{p}");io::stdout().flush()?;let mut s=String::new();io::stdin().read_line(&mut s)?;Ok(s.trim().into())}
 fn is_iso(p:&std::path::Path)->bool{p.is_file()&&p.extension().and_then(|x|x.to_str()).map(|x|x.eq_ignore_ascii_case("iso")).unwrap_or(false)}
-fn scan_isos()->Vec<String>{
- let mut found=Vec::new();let mut stack=vec![std::path::PathBuf::from("/")];
+fn scan_isos<F:FnMut(usize,usize)>(mut progress:F)->Vec<String>{
+ let mut found=Vec::new();let mut stack=vec![std::path::PathBuf::from("/")];let mut scanned=0usize;let mut discovered=1usize;
  while let Some(dir)=stack.pop(){
   if matches!(dir.to_str(),Some("/proc")|Some("/sys")|Some("/dev")|Some("/run")){continue}
-  let entries=match fs::read_dir(&dir){Ok(x)=>x,Err(_)=>continue};
-  for e in entries.flatten(){let p=e.path();if p.is_dir(){stack.push(p)}else if is_iso(&p){found.push(p.display().to_string())}}
+  let entries=match fs::read_dir(&dir){Ok(x)=>x,Err(_)=>{scanned+=1;progress(scanned,discovered);continue}};
+  for e in entries.flatten(){let p=e.path();if p.is_dir(){stack.push(p);discovered+=1}else if is_iso(&p){found.push(p.display().to_string())}}
+  scanned+=1;progress(scanned,discovered);
  }
  found.sort_by_key(|p|p.to_lowercase());found.dedup();found
+}
+fn scan_screen()->Vec<String>{
+ clear();banner();println!("{YE}Preparing ISO filesystem scan...{X}");io::stdout().flush().ok();std::thread::sleep(Duration::from_millis(900));
+ clear();println!("{CY}{BO}ISO IMAGE SELECTOR{X}\n");println!("{YE}Scanning every filesystem for ISO images...{X}\n");
+ let mut last=Instant::now();
+ let isos=scan_isos(|done,total|{
+  if last.elapsed()>=Duration::from_millis(40){
+   let pct=(done as f64/total.max(done) as f64*100.0).clamp(0.0,100.0);let width=42usize;let filled=(pct*width as f64/100.0) as usize;
+   print!("\r{CY}[{}{}]{X} {:>5.1}%  {YE}{} directories scanned{X}","█".repeat(filled)," ".repeat(width-filled),pct,done);let _=io::stdout().flush();last=Instant::now();
+  }
+ });
+ println!("\n\n{GR}Scan complete.{X} Found {} ISO file{}.",isos.len(),if isos.len()==1{""}else{"s"});std::thread::sleep(Duration::from_millis(500));isos
 }
 fn iso_picker()->io::Result<String>{
  let _term=Terminal::raw()?;let mut selected=0usize;let mut scroll=0usize;let visible=12usize;
  loop{
-  clear();println!("{CY}{BO}ISO IMAGE SELECTOR{X}\n");println!("{YE}Scanning the filesystem for .iso files...{X}");io::stdout().flush()?;
-  let isos=scan_isos();
+  let isos=scan_screen();
   loop{
    clear();println!("{CY}{BO}ISO IMAGE SELECTOR{X}\n");
    if isos.is_empty(){println!("{RE}No ISO files found.{X}\n");println!("{YE}Press {BO}Tab{X} to scan again or {BO}Esc{X} to cancel.");}
