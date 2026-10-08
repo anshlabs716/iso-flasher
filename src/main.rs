@@ -703,8 +703,15 @@ fn handle_flash_key(key: u8, snake: &mut Snake, snake_mode: &mut bool) {
         b'a' | b'A' => snake.turn(Point { x: -1, y: 0 }),
         b'd' | b'D' => snake.turn(Point { x: 1, y: 0 }),
         0x1b => {
-            if arrow_key() == Some(b'[') && read_key() == Some(b'Z') {
-                *snake_mode = !*snake_mode;
+            if read_key() == Some(b'[') {
+                match read_key() {
+                    Some(b'A') => snake.turn(Point { x: 0, y: -1 }),
+                    Some(b'B') => snake.turn(Point { x: 0, y: 1 }),
+                    Some(b'C') => snake.turn(Point { x: 1, y: 0 }),
+                    Some(b'D') => snake.turn(Point { x: -1, y: 0 }),
+                    Some(b'Z') => *snake_mode = !*snake_mode,
+                    _ => {}
+                }
             }
         }
         _ => {}
