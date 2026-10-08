@@ -186,115 +186,6 @@ fn device_size(path: &Path) -> io::Result<u64> {
     }
 }
 
-fn removable_devices() -> io::Result<Vec<(PathBuf, u64)>> {
-    let mut devices = Vec::new();
-
-    for entry in fs::read_dir("/sys/block")? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-
-        if ["loop", "ram", "zram", "dm-"].iter().any(|prefix| name.starts_with(prefix)) {
-            continue;
-        }
-
-        if !is_removable(&name) {
-            continue;
-        }
-
-        let path = PathBuf::from(format!("/dev/{name}"));
-        if let Ok(size) = device_size(&path) {
-            devices.push((path, size));
-        }
-    }
-
-    devices.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(devices)
-}
-
-fn usb_picker() -> io::Result<PathBuf> {
-    let _terminal = TerminalGuard::raw()?;
-    let mut selected = 0usize;
-
-    loop {
-        let devices = removable_devices()?;
-
-        clear_screen();
-        println!("{MAGENTA}{BOLD}USB TARGET SELECTOR{RESET}\n");
-
-        if devices.is_empty() {
-            println!("{RED}No removable USB drives detected.{RESET}\n");
-            println!("{YELLOW}[R]{RESET} Refresh    {YELLOW}[Esc]{RESET} Cancel");
-        } else {
-            for (index, (path, size)) in devices.iter().enumerate() {
-                if index == selected {
-                    println!(
-                        "{GREEN}{BOLD}  > {}{RESET}  {:>7.2} GB",
-                        path.display(),
-                        *size as f64 / 1e9
-                    );
-                } else {
-                    println!("    {}  {:>7.2} GB", path.display(), *size as f64 / 1e9);
-                }
-            }
-
-            if selected >= devices.len() {
-                selected = devices.len().saturating_sub(1);
-            }
-
-            println!(
-                "\n{YELLOW}↑/↓{RESET} Browse   {YELLOW}Enter{RESET} Select   {YELLOW}R{RESET} Refresh   {YELLOW}Esc{RESET} Cancel"
-            );
-            println!(
-                "{CYAN}USB target {} of {}{RESET}",
-                selected + 1,
-                devices.len()
-            );
-        }
-
-        io::stdout().flush()?;
-
-        loop {
-            if let Some(key) = read_key() {
-                if key == 3 || !RUNNING.load(Ordering::SeqCst) {
-                    return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
-                }
-                match key {
-                    b'r' | b'R' => break,
-                    10 | 13 => {
-                        if let Some((path, _)) = devices.get(selected) {
-                            return Ok(path.clone());
-                        }
-                    }
-                    0x1b => {
-                        if let Some(direction) = arrow_key() {
-                            match direction {
-                                b'A' if selected > 0 => {
-                                    selected -= 1;
-                                    break;
-                                }
-                                b'B' if selected + 1 < devices.len() => {
-                                    selected += 1;
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Interrupted,
-                                "USB selection cancelled",
-                            ));
-                        }
-                    }
-                    _ => {}
-                }
-            } else {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
-    }
-}
-
-
 fn prompt(message: &str) -> io::Result<String> {
     print!("{message}");
     io::stdout().flush()?;
@@ -310,94 +201,6 @@ fn is_iso(path: &Path) -> bool {
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("iso"))
-}
-
-fn scan_directories() -> io::Result<Vec<PathBuf>> {
-    // Only scan real user data under /home. Do not enumerate the Linux
-    // filesystem root, system partitions, /proc, /sys, /dev, /run, etc.
-    let home = Path::new("/home");
-    let mut directories = Vec::new();
-    let mut pending = Vec::new();
-
-    if !home.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "/home does not exist",
-        ));
-    }
-
-    for entry in fs::read_dir(home)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            pending.push(path);
-        }
-    }
-
-    while let Some(directory) = pending.pop() {
-        if !RUNNING.load(Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
-        }
-        directories.push(directory.clone());
-
-        let entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-
-        for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type() {
-                if file_type.is_dir() {
-                    pending.push(entry.path());
-                }
-            }
-        }
-    }
-
-    directories.sort_by_key(|path| path.to_string_lossy().to_lowercase());
-    directories.dedup();
-    Ok(directories)
-}
-
-fn scan_isos<F>(root: &Path, mut progress: F) -> io::Result<Vec<PathBuf>>
-where
-    F: FnMut(usize, usize),
-{
-    let mut found = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    let mut scanned = 0;
-
-    while let Some(directory) = pending.pop() {
-        if !RUNNING.load(Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
-        }
-
-        let entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(_) => {
-                scanned += 1;
-                progress(scanned, found.len());
-                continue;
-            }
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-
-            if path.is_dir() {
-                pending.push(path);
-            } else if is_iso(&path) {
-                found.push(path);
-            }
-        }
-
-        scanned += 1;
-        progress(scanned, found.len());
-    }
-
-    found.sort_by(|a, b| a.to_string_lossy().to_lowercase().cmp(&b.to_string_lossy().to_lowercase()));
-    found.dedup();
-    Ok(found)
 }
 
 fn read_key() -> Option<u8> {
@@ -429,208 +232,138 @@ fn arrow_key() -> Option<u8> {
     read_key()
 }
 
-fn directory_picker() -> io::Result<PathBuf> {
-    let directories = scan_directories()?;
-    if directories.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "no directories available"));
-    }
-
-    let _terminal = TerminalGuard::raw()?;
-    let mut selected = 0usize;
-    let mut scroll = 0usize;
-    const VISIBLE: usize = 14;
-
-    loop {
-        clear_screen();
-        println!("{CYAN}{BOLD}ISO DIRECTORY SELECTOR{RESET}\n");
-        println!("{YELLOW}Choose a directory to scan for ISO images:{RESET}\n");
-
-        let end = (scroll + VISIBLE).min(directories.len());
-        for (index, directory) in directories[scroll..end].iter().enumerate() {
-            let index = scroll + index;
-            if index == selected {
-                println!("{GREEN}{BOLD}  > {}{RESET}", directory.display());
-            } else {
-                println!("    {}", directory.display());
-            }
-        }
-
-        println!(
-            "\n{YELLOW}↑/↓{RESET} Browse   {YELLOW}Enter{RESET} Scan selected   {YELLOW}Esc{RESET} Cancel"
-        );
-        println!("{CYAN}Directory {} of {}{RESET}", selected + 1, directories.len());
-        io::stdout().flush()?;
-
-        loop {
-            if let Some(key) = read_key() {
-                if key == 3 || !RUNNING.load(Ordering::SeqCst) {
-                    return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
-                }
-                match key {
-                    10 | 13 => return Ok(directories[selected].clone()),
-                    0x1b => {
-                        if let Some(direction) = arrow_key() {
-                            match direction {
-                                b'A' if selected > 0 => {
-                                    selected -= 1;
-                                    if selected < scroll {
-                                        scroll = selected;
-                                    }
-                                    break;
-                                }
-                                b'B' if selected + 1 < directories.len() => {
-                                    selected += 1;
-                                    if selected >= scroll + VISIBLE {
-                                        scroll = selected - VISIBLE + 1;
-                                    }
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Interrupted,
-                                "ISO selection cancelled",
-                            ));
-                        }
-                    }
-                    _ => {}
-                }
-            } else {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
-    }
-}
-
-fn scan_screen(root: &Path) -> io::Result<Vec<PathBuf>> {
+fn title_screen() {
     clear_screen();
-    println!("{YELLOW}{BOLD}ISO IMAGE SELECTOR{RESET}\n");
-    println!("{YELLOW}Scanning {} for ISO images...{RESET}\n", root.display());
-    println!("{CYAN}0 directories scanned — {GREEN}0 images found!{RESET}");
-    io::stdout().flush()?;
-
-    let mut last_update = Instant::now();
-    let images = scan_isos(root, |directories, found| {
-        if last_update.elapsed() >= Duration::from_millis(40) {
-            print!(
-                "\r{CYAN}{directories} directories scanned — {GREEN}{found} image{} found!{RESET}   ",
-                if found == 1 { "" } else { "s" }
-            );
-            let _ = io::stdout().flush();
-            last_update = Instant::now();
-        }
-    })?;
-
-    println!(
-        "\r{GREEN}Scan complete!{RESET}  {} image{} found!   ",
-        images.len(),
-        if images.len() == 1 { "" } else { "s" }
-    );
-    io::stdout().flush()?;
-    std::thread::sleep(Duration::from_millis(500));
-
-    Ok(images)
+    println!("{MAGENTA}{BOLD}╔══════════════════════════════════════════════╗{RESET}");
+    println!("{MAGENTA}{BOLD}║              ISO-FLASHER 2.0                ║{RESET}");
+    println!("{MAGENTA}{BOLD}╚══════════════════════════════════════════════╝{RESET}\n");
+    println!("{CYAN}Fast, lightweight ISO-to-USB flashing for Linux.{RESET}\n");
+    println!("The next two steps use your desktop file picker:");
+    println!("  1. Select the whole USB device");
+    println!("  2. Select the ISO image\n");
+    println!("{YELLOW}Do not select a partition such as /dev/sdb1.{RESET}");
+    println!("{YELLOW}Select the whole device, such as /dev/sdb.{RESET}\n");
+    println!("{GREEN}No filesystem scanning. No custom browser. Just pick and flash.{RESET}\n");
+    println!("Press Enter to open the USB picker.");
+    let _ = io::stdout().flush();
+    let _ = prompt("");
 }
 
-fn iso_picker() -> io::Result<PathBuf> {
-    loop {
-        let root = directory_picker()?;
-        let images = scan_screen(&root)?;
+fn run_file_picker(title: &str, start: &Path, iso_only: bool) -> io::Result<PathBuf> {
+    if Command::new("kdialog").arg("--version").output().is_ok() {
+        let mut command = Command::new("kdialog");
+        command.arg("--getopenfilename").arg(start);
+        if iso_only {
+            command.arg("ISO images (*.iso)");
+        } else {
+            command.arg("All files (*)");
+        }
+        command.arg("--title").arg(title);
 
-        let _terminal = TerminalGuard::raw()?;
-        let mut selected = 0usize;
-        let mut scroll = 0usize;
-        const VISIBLE: usize = 12;
-
-        loop {
-            clear_screen();
-            println!("{CYAN}{BOLD}ISO IMAGE SELECTOR{RESET}\n");
-
-            if images.is_empty() {
-                println!("{RED}No ISO files found in {}.{RESET}\n", root.display());
-                println!(
-                    "{YELLOW}Press {BOLD}Tab{RESET} to choose another directory or                      {BOLD}Esc{RESET} to cancel."
-                );
-            } else {
-                let end = (scroll + VISIBLE).min(images.len());
-                println!(
-                    "Found {} ISO file{} in {}:\n",
-                    images.len(),
-                    if images.len() == 1 { "" } else { "s" },
-                    root.display()
-                );
-
-                for (offset, image) in images[scroll..end].iter().enumerate() {
-                    let index = scroll + offset;
-                    if index == selected {
-                        println!("{GREEN}{BOLD}  > {}{RESET}", image.display());
-                    } else {
-                        println!("    {}", image.display());
-                    }
-                }
-
-                println!(
-                    "\n{YELLOW}↑/↓{RESET} Browse   {YELLOW}Enter{RESET} Select                        {YELLOW}Tab{RESET} Choose directory   {YELLOW}Esc{RESET} Cancel"
-                );
-            }
-
-            io::stdout().flush()?;
-
-            loop {
-                if let Some(key) = read_key() {
-                    if key == 3 || !RUNNING.load(Ordering::SeqCst) {
-                        return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
-                    }
-                    match key {
-                        9 => break,
-                        10 | 13 => {
-                            if let Some(image) = images.get(selected) {
-                                return Ok(image.clone());
-                            }
-                        }
-                        0x1b => {
-                            if let Some(direction) = arrow_key() {
-                                match direction {
-                                    b'A' if selected > 0 => {
-                                        selected -= 1;
-                                        if selected < scroll {
-                                            scroll = selected;
-                                        }
-                                        break;
-                                    }
-                                    b'B' if selected + 1 < images.len() => {
-                                        selected += 1;
-                                        if selected >= scroll + VISIBLE {
-                                            scroll = selected - VISIBLE + 1;
-                                        }
-                                        break;
-                                    }
-                                    _ => {}
-                                }
-                            } else {
-                                return Err(io::Error::new(
-                                    io::ErrorKind::Interrupted,
-                                    "ISO selection cancelled",
-                                ));
-                            }
-                        }
-                        _ => {}
-                    }
-                } else {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
+        let output = command.output()?;
+        if output.status.success() {
+            let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !selected.is_empty() {
+                return Ok(PathBuf::from(selected));
             }
         }
+
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            format!("{title} cancelled"),
+        ));
     }
+
+    if Command::new("zenity").arg("--version").output().is_ok() {
+        let mut command = Command::new("zenity");
+        command
+            .arg("--file-selection")
+            .arg("--title")
+            .arg(title)
+            .arg("--filename")
+            .arg(start);
+
+        if iso_only {
+            command.arg("--file-filter=ISO images | *.iso");
+        }
+
+        let output = command.output()?;
+        if output.status.success() {
+            let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !selected.is_empty() {
+                return Ok(PathBuf::from(selected));
+            }
+        }
+
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            format!("{title} cancelled"),
+        ));
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no desktop file picker found; install kdialog or zenity",
+    ))
+}
+
+fn is_partition(device: &Path) -> bool {
+    let Some(name) = device.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    Path::new("/sys/class/block")
+        .join(name)
+        .join("partition")
+        .exists()
+}
+
+fn pick_usb_device() -> io::Result<PathBuf> {
+    let device = run_file_picker(
+        "Select the USB device to erase and flash",
+        Path::new("/dev/"),
+        false,
+    )?;
+
+    if !device.starts_with("/dev/") || device.to_string_lossy()[5..].contains('/') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "select a device directly under /dev",
+        ));
+    }
+
+    if is_partition(&device) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "select the whole USB device, not a partition",
+        ));
+    }
+
+    Ok(device)
+}
+
+fn pick_iso() -> io::Result<PathBuf> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+
+    let iso = run_file_picker("Select an ISO image", &home, true)?;
+
+    if !is_iso(&iso) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "selected file is not an ISO image",
+        ));
+    }
+
+    Ok(iso)
 }
 
 fn interactive() -> io::Result<(PathBuf, PathBuf)> {
-    // 1. Pick the USB target first.
-    let device = usb_picker()?;
+    title_screen();
 
-    // 2. Only after the USB is selected, scan /home for user directories.
-    let iso = iso_picker()?;
+    let device = pick_usb_device()?;
+    let iso = pick_iso()?;
 
     Ok((iso, device))
 }
@@ -714,15 +447,37 @@ fn validate_target(iso: &Path, device: &Path, force: bool) -> io::Result<u64> {
 }
 
 fn unmount(device: &Path) -> io::Result<()> {
-    let status = Command::new("/bin/umount").arg(device).status()?;
-    if status.success() || status.code() == Some(32) {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!(
-            "failed to unmount {}",
-            device.display()
-        )))
+    let name = device
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid device name"))?;
+
+    let block_path = Path::new("/sys/class/block").join(name);
+    let mut targets = Vec::new();
+
+    if block_path.is_dir() {
+        for entry in fs::read_dir(&block_path)? {
+            let entry = entry?;
+            let partition = entry.file_name().to_string_lossy().into_owned();
+            if entry.path().join("partition").exists() {
+                targets.push(PathBuf::from(format!("/dev/{partition}")));
+            }
+        }
     }
+
+    targets.push(device.to_path_buf());
+
+    for target in targets {
+        let status = Command::new("/bin/umount").arg(&target).status()?;
+        if !status.success() && status.code() != Some(32) {
+            return Err(io::Error::other(format!(
+                "failed to unmount {}",
+                target.display()
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 fn handle_flash_key(key: u8, snake: &mut Snake, snake_mode: &mut bool) {
