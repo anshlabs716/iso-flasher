@@ -225,13 +225,6 @@ fn read_key() -> Option<u8> {
     }
 }
 
-fn arrow_key() -> Option<u8> {
-    if read_key() != Some(0x1b) || read_key() != Some(b'[') {
-        return None;
-    }
-    read_key()
-}
-
 fn title_screen() {
     clear_screen();
     println!("{MAGENTA}{BOLD}╔══════════════════════════════════════════════╗{RESET}");
@@ -367,7 +360,6 @@ fn interactive() -> io::Result<(PathBuf, PathBuf)> {
 
     Ok((iso, device))
 }
-
 
 #[derive(Default)]
 struct Cli {
