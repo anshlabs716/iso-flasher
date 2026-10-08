@@ -309,6 +309,9 @@ fn usb_picker() -> io::Result<PathBuf> {
 
         loop {
             if let Some(key) = read_key() {
+                if key == 3 || !RUNNING.load(Ordering::SeqCst) {
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
+                }
                 match key {
                     b'r' | b'R' => break,
                     10 | 13 => {
@@ -386,6 +389,9 @@ fn scan_directories() -> io::Result<Vec<PathBuf>> {
     }
 
     while let Some(directory) = pending.pop() {
+        if !RUNNING.load(Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
+        }
         directories.push(directory.clone());
 
         let entries = match fs::read_dir(&directory) {
@@ -416,6 +422,10 @@ where
     let mut scanned = 0;
 
     while let Some(directory) = pending.pop() {
+        if !RUNNING.load(Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
+        }
+
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(_) => {
@@ -457,6 +467,9 @@ fn read_key() -> Option<u8> {
 
     let mut byte = [0_u8; 1];
     if unsafe { read(poll_fd.fd, byte.as_mut_ptr() as *mut c_void, 1) } == 1 {
+        if byte[0] == 3 {
+            RUNNING.store(false, Ordering::SeqCst);
+        }
         Some(byte[0])
     } else {
         None
@@ -504,6 +517,9 @@ fn directory_picker() -> io::Result<PathBuf> {
 
         loop {
             if let Some(key) = read_key() {
+                if key == 3 || !RUNNING.load(Ordering::SeqCst) {
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
+                }
                 match key {
                     10 | 13 => return Ok(directories[selected].clone()),
                     0x1b => {
@@ -617,6 +633,9 @@ fn iso_picker() -> io::Result<PathBuf> {
 
             loop {
                 if let Some(key) = read_key() {
+                    if key == 3 || !RUNNING.load(Ordering::SeqCst) {
+                        return Err(io::Error::new(io::ErrorKind::Interrupted, "operation cancelled"));
+                    }
                     match key {
                         9 => break,
                         10 | 13 => {
@@ -923,6 +942,8 @@ fn run() -> io::Result<()> {
             "root access is required; run with sudo",
         ));
     }
+
+    RUNNING.store(true, Ordering::SeqCst);
 
     let cli = parse_args();
     let (iso, device) = match (cli.iso, cli.device) {
