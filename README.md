@@ -34,7 +34,6 @@ git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
 cargo build --release
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
-
 sudo iso-flasher
 ```
 
