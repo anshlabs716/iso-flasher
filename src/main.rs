@@ -11,6 +11,10 @@ use std::{
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
+extern "C" fn stop(_signal: i32) {
+    RUNNING.store(false, Ordering::SeqCst);
+}
+
 const BUFFER_SIZE: usize = 4 * 1024 * 1024;
 const SNAKE_WIDTH: i32 = 42;
 const SNAKE_HEIGHT: i32 = 14;
