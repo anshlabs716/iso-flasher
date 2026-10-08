@@ -27,32 +27,26 @@ sudo apt install -y git gcc rustc cargo
 
 > GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo are installed directly from the distro packages. No CMake or rustup setup is required.
 
-### 2. Install iso-flasher
+### 2. Install and run iso-flasher
 
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
 cd iso-flasher
 cargo build --release
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
-```
 
-### 3. Run
-
-```bash
 sudo iso-flasher
-```
-
-Or:
-
-```bash
-sudo iso-flasher --iso image.iso --device /dev/sdX
 ```
 
 ### Uninstall
 
+Remove the installed binary:
+
 ```bash
 sudo rm -f /usr/local/bin/iso-flasher
 ```
+
+Remove the cloned project separately:
 
 ```bash
 rm -rf iso-flasher
@@ -78,9 +72,10 @@ Reworked components:
 - ⌨️ Ctrl+C cancellation
 - 🐍 Snake mode
 - 🔄 USB refresh
-- 🔎 Full-filesystem ISO discovery
+- 🔎 Directory-based ISO discovery
+- 📁 Interactive directory picker
 - ⬆️⬇️ Arrow-key ISO browser
-- 🔁 Tab-to-rescan ISO search
+- 🔁 Tab-to-choose-another-directory
 - 🧹 Direct unmount command without shell interpolation
 
 ---
@@ -101,9 +96,9 @@ Reworked components:
 
 | Control | Action |
 |---|---|
-| ↑ / ↓ | Browse discovered ISO files |
-| Enter | Select ISO |
-| Tab | Scan the filesystem for ISO files again |
+| ↑ / ↓ | Browse directories and ISO files |
+| Enter | Select directory or ISO |
+| Tab | Choose another directory while browsing ISO results |
 | Esc | Cancel ISO selection |
 | WASD | Move Snake |
 | Arrow keys | Move Snake |
@@ -111,7 +106,7 @@ Reworked components:
 | Ctrl+C | Cancel |
 | R | Refresh USB dashboard at the input screen |
 
-When run without `--iso`, iso-flasher automatically scans the entire filesystem for `.iso` files and presents them in an interactive browser. Use **↑ / ↓** to browse the results, **Enter** to select an ISO, and **Tab** to scan the filesystem again. No manual ISO path entry is required. Virtual filesystems such as `/proc`, `/sys`, `/dev`, and `/run` are skipped during the scan.
+When run without `--iso`, iso-flasher first lets you choose which directory to scan. Use **↑ / ↓** to browse directories and **Enter** to scan the selected directory. The scan recursively searches only that directory for `.iso` files and shows the live number of images found. Press **Tab** to choose another directory or **Esc** to cancel. No manual ISO path entry is required.
 
 ---
 
