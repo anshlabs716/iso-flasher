@@ -16,18 +16,18 @@
 
 ## ⚡ Quick Start
 
-### Prerequisites
+### 1. Install prerequisites
 
-For Debian, Ubuntu, MX Linux, and other APT-based systems:
+For Debian, Ubuntu, MX Linux, and other APT-based systems, install everything needed to build iso-flasher:
 
 ```bash
 sudo apt update
 sudo apt install -y git gcc rustc cargo
 ```
 
-> GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo are installed directly from the distro packages here, so no CMake or rustup setup is required.
+> GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo are installed directly from the distro packages. No CMake or rustup setup is required.
 
-### Build
+### 2. Install iso-flasher
 
 ```bash
 git clone https://github.com/anshlabs716/iso-flasher.git
@@ -36,7 +36,7 @@ cargo build --release
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
 ```
 
-### Run
+### 3. Run
 
 ```bash
 sudo iso-flasher
