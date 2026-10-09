@@ -6,9 +6,9 @@
 
 **Safe raw-device flashing • Live progress • Snake mode • No bloat**
 
-[![Rust](https://img.shields.io/badge/Rust-100%25-000000?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
-[![Linux](https://img.shields.io/badge/Linux-primary-1793D1?style=for-the-badge&logo=linux)](https://github.com/anshlabs716/iso-flasher)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://opensource.org/license/mit/)
+[![Rust](https://img.shields.io/badge/Rust-written%20in%20Rust-black?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Linux](https://img.shields.io/badge/Platform-Linux-1793D1?logo=linux&logoColor=white)](https://github.com/anshlabs716/iso-flasher)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/license/mit/)
 
 </div>
 
