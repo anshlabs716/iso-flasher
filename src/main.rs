@@ -1,6 +1,6 @@
 use std::{
     env,
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{self, Read, Write},
     os::{fd::AsRawFd, raw::c_void},
     path::{Path, PathBuf},
@@ -8,6 +8,12 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+
+mod devices;
+mod helpers;
+mod portal;
+mod select;
+mod session;
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
@@ -48,7 +54,7 @@ struct PollFd {
     revents: i16,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Point {
     x: i32,
     y: i32,
@@ -66,9 +72,18 @@ impl Snake {
     fn new() -> Self {
         let mut snake = Self {
             body: vec![
-                Point { x: SNAKE_WIDTH / 2, y: SNAKE_HEIGHT / 2 },
-                Point { x: SNAKE_WIDTH / 2 - 1, y: SNAKE_HEIGHT / 2 },
-                Point { x: SNAKE_WIDTH / 2 - 2, y: SNAKE_HEIGHT / 2 },
+                Point {
+                    x: SNAKE_WIDTH / 2,
+                    y: SNAKE_HEIGHT / 2,
+                },
+                Point {
+                    x: SNAKE_WIDTH / 2 - 1,
+                    y: SNAKE_HEIGHT / 2,
+                },
+                Point {
+                    x: SNAKE_WIDTH / 2 - 2,
+                    y: SNAKE_HEIGHT / 2,
+                },
             ],
             direction: Point { x: 1, y: 0 },
             food: Point { x: 0, y: 0 },
@@ -168,12 +183,6 @@ fn clear_screen() {
     print!("\x1b[2J\x1b[3J\x1b[H");
 }
 
-fn is_removable(name: &str) -> bool {
-    fs::read_to_string(format!("/sys/block/{name}/removable"))
-        .map(|value| value.trim() == "1")
-        .unwrap_or(false)
-}
-
 fn device_size(path: &Path) -> io::Result<u64> {
     let file = OpenOptions::new().read(true).open(path)?;
     let mut size = 0_u64;
@@ -193,14 +202,6 @@ fn prompt(message: &str) -> io::Result<String> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     Ok(input.trim().to_owned())
-}
-
-fn is_iso(path: &Path) -> bool {
-    path.is_file()
-        && path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("iso"))
 }
 
 fn read_key() -> Option<u8> {
@@ -231,134 +232,43 @@ fn title_screen() {
     println!("{MAGENTA}{BOLD}║              ISO-FLASHER 2.0                ║{RESET}");
     println!("{MAGENTA}{BOLD}╚══════════════════════════════════════════════╝{RESET}\n");
     println!("{CYAN}Fast, lightweight ISO-to-USB flashing for Linux.{RESET}\n");
-    println!("The next two steps use your desktop file picker:");
-    println!("  1. Select the whole USB device");
-    println!("  2. Select the ISO image\n");
+    println!(
+        "File chooser: {CYAN}{}{RESET}\n",
+        select::describe_backend()
+    );
+    println!("The next two steps choose what to flash and where:");
+    println!("  1. Select the USB device (raw disks are listed, not files)");
+    println!("  2. Select the ISO image using your desktop file picker\n");
     println!("{YELLOW}Do not select a partition such as /dev/sdb1.{RESET}");
     println!("{YELLOW}Select the whole device, such as /dev/sdb.{RESET}\n");
     println!("{GREEN}No filesystem scanning. No custom browser. Just pick and flash.{RESET}\n");
-    println!("Press Enter to open the USB picker.");
+    println!("Press Enter to list removable devices.");
     let _ = io::stdout().flush();
     let _ = prompt("");
 }
 
-fn run_file_picker(title: &str, start: &Path, iso_only: bool) -> io::Result<PathBuf> {
-    if Command::new("kdialog").arg("--version").output().is_ok() {
-        let mut command = Command::new("kdialog");
-        command.arg("--getopenfilename").arg(start);
-        if iso_only {
-            command.arg("ISO images (*.iso)");
-        } else {
-            command.arg("All files (*)");
-        }
-        command.arg("--title").arg(title);
-
-        let output = command.output()?;
-        if output.status.success() {
-            let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-            if !selected.is_empty() {
-                return Ok(PathBuf::from(selected));
-            }
-        }
-
-        return Err(io::Error::new(
-            io::ErrorKind::Interrupted,
-            format!("{title} cancelled"),
-        ));
-    }
-
-    if Command::new("zenity").arg("--version").output().is_ok() {
-        let mut command = Command::new("zenity");
-        command
-            .arg("--file-selection")
-            .arg("--title")
-            .arg(title)
-            .arg("--filename")
-            .arg(start);
-
-        if iso_only {
-            command.arg("--file-filter=ISO images | *.iso");
-        }
-
-        let output = command.output()?;
-        if output.status.success() {
-            let selected = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-            if !selected.is_empty() {
-                return Ok(PathBuf::from(selected));
-            }
-        }
-
-        return Err(io::Error::new(
-            io::ErrorKind::Interrupted,
-            format!("{title} cancelled"),
-        ));
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "no desktop file picker found; install kdialog or zenity",
-    ))
-}
-
-fn is_partition(device: &Path) -> bool {
-    let Some(name) = device.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-
-    Path::new("/sys/class/block")
-        .join(name)
-        .join("partition")
-        .exists()
-}
-
-fn pick_usb_device() -> io::Result<PathBuf> {
-    let device = run_file_picker(
-        "Select the USB device to erase and flash",
-        Path::new("/dev/"),
-        false,
-    )?;
-
-    if !device.starts_with("/dev/") || device.to_string_lossy()[5..].contains('/') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "select a device directly under /dev",
-        ));
-    }
-
-    if is_partition(&device) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "select the whole USB device, not a partition",
-        ));
-    }
-
-    Ok(device)
-}
-
-fn pick_iso() -> io::Result<PathBuf> {
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-
-    let iso = run_file_picker("Select an ISO image", &home, true)?;
-
-    if !is_iso(&iso) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "selected file is not an ISO image",
-        ));
-    }
-
-    Ok(iso)
-}
-
+/// Resolve both the ISO and the target device.
 fn interactive() -> io::Result<(PathBuf, PathBuf)> {
     title_screen();
 
-    let device = pick_usb_device()?;
-    let iso = pick_iso()?;
+    let device = select::choose_device(None).map_err(selection_to_io)?;
+    println!(
+        "\n{CYAN}Target{RESET}  {BOLD}/dev/{}{RESET}  {}",
+        device.name,
+        device.describe()
+    );
 
-    Ok((iso, device))
+    let iso = select::choose_iso().map_err(selection_to_io)?;
+    Ok((iso, device.path))
+}
+
+fn selection_to_io(error: select::SelectionError) -> io::Error {
+    match error {
+        select::SelectionError::Cancelled => {
+            io::Error::new(io::ErrorKind::Interrupted, "cancelled by user")
+        }
+        other => io::Error::other(other.to_string()),
+    }
 }
 
 #[derive(Default)]
@@ -390,7 +300,17 @@ fn parse_args() -> Cli {
             "-f" | "--force" => cli.force = true,
             "-h" | "--help" => {
                 println!(
-                    "iso-flasher 2.0.0\n\n                     Usage: sudo iso-flasher [--iso IMAGE --device /dev/sdX] [--force]"
+                    "iso-flasher 2.0.0\n\n\
+                     Usage: sudo iso-flasher [--iso IMAGE --device /dev/sdX] [--force]\n\n\
+                     ISO files are chosen with the desktop's own file chooser via the\n\
+                     XDG Desktop Portal, so KDE, GNOME, Xfce, Cinnamon, MATE, Budgie,\n\
+                     LXQt and COSMIC all work on Wayland and X11 without extra packages.\n\
+                     kdialog/zenity/yad are used only if no portal is available.\n\n\
+                     USB devices are not files, so they are listed from sysfs with their\n\
+                     model and capacity rather than shown in a file picker. Partitions\n\
+                     such as /dev/sdb1 are always rejected.\n\n\
+                     Current file chooser: {}",
+                    select::describe_backend()
                 );
                 std::process::exit(0);
             }
@@ -403,73 +323,31 @@ fn parse_args() -> Cli {
 }
 
 fn validate_target(iso: &Path, device: &Path, force: bool) -> io::Result<u64> {
-    let metadata = fs::metadata(iso)?;
-    if !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "ISO is not a regular file",
-        ));
-    }
+    let total = select::validate_iso(iso)?.metadata()?.len();
 
-    let device_string = device.to_string_lossy();
-    if !device_string.starts_with("/dev/") || device_string[5..].contains('/') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "target must be /dev/<device>",
-        ));
-    }
+    // Reject partitions and non-device nodes, then require the device to look
+    // like removable media unless the user explicitly overrides with --force.
+    let info = devices::validate_target(device)?;
 
-    let name = &device_string[5..];
-    if !force && !is_removable(name) {
+    if !force && !(info.removable || info.transport.as_deref() == Some("usb")) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "target is not removable; use --force only after verifying it",
+            format!(
+                "/dev/{} is not removable; use --force only after verifying it",
+                info.name
+            ),
         ));
     }
 
     let size = device_size(device)?;
-    if size > 0 && metadata.len() > size {
+    if size > 0 && total > size {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "target device is smaller than the ISO",
         ));
     }
 
-    Ok(metadata.len())
-}
-
-fn unmount(device: &Path) -> io::Result<()> {
-    let name = device
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid device name"))?;
-
-    let block_path = Path::new("/sys/class/block").join(name);
-    let mut targets = Vec::new();
-
-    if block_path.is_dir() {
-        for entry in fs::read_dir(&block_path)? {
-            let entry = entry?;
-            let partition = entry.file_name().to_string_lossy().into_owned();
-            if entry.path().join("partition").exists() {
-                targets.push(PathBuf::from(format!("/dev/{partition}")));
-            }
-        }
-    }
-
-    targets.push(device.to_path_buf());
-
-    for target in targets {
-        let status = Command::new("/bin/umount").arg(&target).status()?;
-        if !status.success() && status.code() != Some(32) {
-            return Err(io::Error::other(format!(
-                "failed to unmount {}",
-                target.display()
-            )));
-        }
-    }
-
-    Ok(())
+    Ok(total)
 }
 
 fn handle_flash_key(key: u8, snake: &mut Snake, snake_mode: &mut bool) {
@@ -478,18 +356,15 @@ fn handle_flash_key(key: u8, snake: &mut Snake, snake_mode: &mut bool) {
         b's' | b'S' => snake.turn(Point { x: 0, y: 1 }),
         b'a' | b'A' => snake.turn(Point { x: -1, y: 0 }),
         b'd' | b'D' => snake.turn(Point { x: 1, y: 0 }),
-        0x1b => {
-            if read_key() == Some(b'[') {
-                match read_key() {
-                    Some(b'A') => snake.turn(Point { x: 0, y: -1 }),
-                    Some(b'B') => snake.turn(Point { x: 0, y: 1 }),
-                    Some(b'C') => snake.turn(Point { x: 1, y: 0 }),
-                    Some(b'D') => snake.turn(Point { x: -1, y: 0 }),
-                    Some(b'Z') => *snake_mode = !*snake_mode,
-                    _ => {}
-                }
-            }
-        }
+        // Escape sequence introducer: read the final byte of the sequence.
+        0x1b if read_key() == Some(b'[') => match read_key() {
+            Some(b'A') => snake.turn(Point { x: 0, y: -1 }),
+            Some(b'B') => snake.turn(Point { x: 0, y: 1 }),
+            Some(b'C') => snake.turn(Point { x: 1, y: 0 }),
+            Some(b'D') => snake.turn(Point { x: -1, y: 0 }),
+            Some(b'Z') => *snake_mode = !*snake_mode,
+            _ => {}
+        },
         _ => {}
     }
 }
@@ -528,7 +403,10 @@ fn write_all_buffer(output: &mut File, buffer: &[u8]) -> io::Result<()> {
     while written < buffer.len() {
         let count = output.write(&buffer[written..])?;
         if count == 0 {
-            return Err(io::Error::new(io::ErrorKind::WriteZero, "device stopped accepting data"));
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "device stopped accepting data",
+            ));
         }
         written += count;
     }
@@ -602,7 +480,11 @@ fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
                 percentage
             );
             println!("Speed   {:>7.1} MiB/s", speed);
-            println!("ETA     {:02}m {:02}s", (eta as u64) / 60, (eta as u64) % 60);
+            println!(
+                "ETA     {:02}m {:02}s",
+                (eta as u64) / 60,
+                (eta as u64) % 60
+            );
             println!("\n{YELLOW}Shift+Tab{RESET} Snake    Ctrl+C Cancel");
             println!("{YELLOW}Press Ctrl+C to cancel the flash at any time.{RESET}");
         }
@@ -611,7 +493,10 @@ fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
     }
 
     if !RUNNING.load(Ordering::SeqCst) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "flash cancelled"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "flash cancelled",
+        ));
     }
 
     if written != total {
@@ -629,16 +514,17 @@ fn run() -> io::Result<()> {
         signal(SIGINT, stop as *const () as usize);
     }
 
+    // Parse arguments first so `--help` works without root.
+    let cli = parse_args();
+
     if unsafe { geteuid() } != 0 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "root access is required; run with sudo",
+            "root access is required to write to a block device; run with sudo",
         ));
     }
 
     RUNNING.store(true, Ordering::SeqCst);
-
-    let cli = parse_args();
     let (iso, device) = match (cli.iso, cli.device) {
         (Some(iso), Some(device)) => (iso, device),
         _ => interactive()?,
@@ -648,10 +534,11 @@ fn run() -> io::Result<()> {
 
     println!("{RED}{BOLD}This will erase {}.{RESET}", device.display());
     if prompt("Type FLASH to continue: ")? != "FLASH" {
+        println!("{YELLOW}Aborted; nothing was written.{RESET}");
         return Ok(());
     }
 
-    unmount(&device)?;
+    select::unmount(&device)?;
     unsafe { sync() };
 
     flash(&iso, &device, total)
@@ -661,6 +548,12 @@ fn main() {
     clear_screen();
 
     if let Err(error) = run() {
+        // A user-cancelled selection is a normal outcome, not a failure.
+        if error.kind() == io::ErrorKind::Interrupted {
+            eprintln!("{YELLOW}Cancelled.{RESET} Nothing was written.");
+            std::process::exit(0);
+        }
+
         eprintln!("{RED}FAIL:{RESET} {error}");
         std::process::exit(1);
     }
@@ -671,13 +564,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn detects_iso_extension_case_insensitively() {
-        assert!(is_iso(Path::new("linux.iso")));
-        assert!(is_iso(Path::new("linux.ISO")));
-        assert!(!is_iso(Path::new("linux.img")));
-    }
 
     #[test]
     fn snake_does_not_reverse_direction() {

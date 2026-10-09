@@ -5,6 +5,11 @@ edition = "2021"
 description = "Fast, lightweight, no-bloat ISO-to-USB flasher"
 license = "MIT"
 
+[dependencies]
+# XDG Desktop Portal client. Used for the standards-based native file chooser
+# (org.freedesktop.portal.FileChooser) so the desktop's own dialog is shown.
+zbus = { version = "5", features = ["blocking-api"] }
+
 [[bin]]
 name = "iso-flasher"
 path = "src/main.rs"
