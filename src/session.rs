@@ -70,6 +70,55 @@ fn non_empty_var(key: &str) -> Option<String> {
     env::var(key).ok().filter(|value| !value.trim().is_empty())
 }
 
+/// UID of the user who invoked sudo/polkit, if we escalated from another user.
+pub fn invoking_uid() -> Option<u32> {
+    for key in ["SUDO_UID", "PKEXEC_UID"] {
+        if let Some(uid) = non_empty_var(key).and_then(|raw| raw.parse::<u32>().ok()) {
+            if uid != 0 {
+                return Some(uid);
+            }
+        }
+    }
+
+    // Not root, or already running as the desktop user.
+    let euid = unsafe { getuid() };
+    if euid != 0 {
+        return Some(euid);
+    }
+
+    None
+}
+
+extern "C" {
+    fn getuid() -> u32;
+}
+
+/// Home directory of the desktop user.
+///
+/// Under `sudo`, `HOME` points at root's home, so the file dialog would open
+/// in `/root` (or fall back to `/`). Read the real home from `/etc/passwd`.
+pub fn invoking_user_home() -> Option<PathBuf> {
+    let uid = invoking_uid()?;
+    let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+
+    for line in passwd.lines() {
+        let fields: Vec<&str> = line.split(':').collect();
+        // name:password:uid:gid:gecos:home:shell
+        if fields.len() < 6 {
+            continue;
+        }
+
+        if fields[2].parse::<u32>().ok() == Some(uid) {
+            let home = fields[5];
+            if !home.is_empty() {
+                return Some(PathBuf::from(home));
+            }
+        }
+    }
+
+    None
+}
+
 /// The user's display server, e.g. `wayland` or `x11`.
 ///
 /// Reconstructed from the runtime directory when the environment was stripped,
@@ -103,31 +152,6 @@ pub fn session_type() -> Option<String> {
 /// running, never by which desktop we think we are on.
 pub fn desktop_environment() -> Option<String> {
     non_empty_var("XDG_CURRENT_DESKTOP").or_else(|| non_empty_var("XDG_SESSION_DESKTOP"))
-}
-
-/// A rough guess at whether a human is sitting at this machine right now.
-///
-/// Used only to decide whether showing a graphical dialog is worth attempting.
-pub fn has_graphical_session() -> bool {
-    if session_bus_address() == BusAddress::Unavailable {
-        return false;
-    }
-
-    non_empty_var("WAYLAND_DISPLAY").is_some()
-        || non_empty_var("DISPLAY").is_some()
-        || session_type().as_deref() == Some("wayland")
-}
-
-/// Report whether the current session looks graphical, for diagnostics.
-pub fn graphical_session_report() -> String {
-    if has_graphical_session() {
-        format!(
-            "yes ({})",
-            session_type().unwrap_or_else(|| "unknown".to_owned())
-        )
-    } else {
-        "no".to_owned()
-    }
 }
 
 /// Whether a named helper program is on `PATH`.
@@ -172,5 +196,27 @@ mod tests {
     #[test]
     fn command_exists_rejects_nonexistent_programs() {
         assert!(!command_exists("definitely-not-a-real-program-xyz"));
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn home_is_recovered_even_when_env_points_at_root() {
+        // Simulate the sudo case: SUDO_UID set and HOME rewritten.
+        unsafe {
+            std::env::set_var("SUDO_UID", "1000");
+            std::env::set_var("HOME", "/root");
+        }
+        assert_eq!(invoking_uid(), Some(1000));
+        let home = invoking_user_home().expect("home for uid 1000");
+        assert_ne!(home, PathBuf::from("/root"), "must not use root's home");
+        assert!(home.is_absolute());
+        unsafe {
+            std::env::remove_var("SUDO_UID");
+            std::env::set_var("HOME", std::env::var("HOME").unwrap_or_default());
+        }
     }
 }

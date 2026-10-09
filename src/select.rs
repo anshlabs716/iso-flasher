@@ -86,6 +86,9 @@ pub fn choose_file(
         }
     } else {
         portal_error = "no XDG desktop file chooser portal is available".to_owned();
+        // Never fall back silently: a helper dialog looks like a plain file
+        // manager, which is confusing without an explanation.
+        explain_portal_failure();
     }
 
     match helpers::choose_file(title, directory, filters) {
@@ -123,18 +126,26 @@ pub fn validate_iso(path: &Path) -> io::Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+/// The directory the ISO chooser should open in: the desktop user's home.
+///
+/// `sudo` rewrites `HOME` to `/root`, which is wrong and usually unreadable to
+/// the desktop session, so recover the invoking user's home from `SUDO_UID`.
+fn starting_directory() -> PathBuf {
+    if let Some(home) = crate::session::invoking_user_home() {
+        if home.is_dir() {
+            return home;
+        }
+    }
+
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
 /// Ask the user to choose an ISO image.
 pub fn choose_iso() -> Result<PathBuf, SelectionError> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-
-    let directory = if home.is_dir() {
-        home
-    } else {
-        PathBuf::from("/")
-    };
-    let selected = choose_file("Select an ISO image", &directory, &iso_filters())?;
+    let selected = choose_file("Select an ISO image", &starting_directory(), &iso_filters())?;
     validate_iso(&selected)?;
     Ok(selected)
 }
@@ -149,15 +160,31 @@ pub fn describe_backend() -> String {
         .unwrap_or_else(|| "session type unknown".to_owned());
 
     if portal::is_available() {
-        format!(
-            "XDG desktop portal file chooser ({desktop}, {session}, graphical: {})",
-            crate::session::graphical_session_report()
-        )
+        format!("XDG desktop portal file chooser ({desktop}, {session})")
     } else if helpers::any_available() {
         format!("helper dialog fallback ({desktop}, {session})")
     } else {
         format!("command line only ({desktop}, {session})")
     }
+}
+
+/// Explain a portal problem, so a fallback is never silent.
+pub fn explain_portal_failure() {
+    let address = match crate::session::session_bus_address() {
+        crate::session::BusAddress::Explicit(address) => address,
+        crate::session::BusAddress::Unavailable => {
+            println!(
+                "{YELLOW}No session bus address found. Run under your desktop session (not a bare tty).{RESET}"
+            );
+            return;
+        }
+    };
+
+    println!(
+        "{YELLOW}XDG file chooser portal unavailable (bus: {address}).{RESET}\n\
+         {YELLOW}Falling back to a helper dialog, which may look like a plain file manager.{RESET}\n\
+         {YELLOW}To restore the native dialog: sudo apt install xdg-desktop-portal xdg-desktop-portal-kde{RESET}"
+    );
 }
 
 /// Render the removable-device list for display.

@@ -237,11 +237,12 @@ fn title_screen() {
         select::describe_backend()
     );
     println!("The next two steps choose what to flash and where:");
-    println!("  1. Select the USB device (raw disks are listed, not files)");
-    println!("  2. Select the ISO image using your desktop file picker\n");
+    println!("  1. Pick the USB drive from the numbered list");
+    println!("  2. Pick the ISO image in your desktop file dialog\n");
     println!("{YELLOW}Do not select a partition such as /dev/sdb1.{RESET}");
     println!("{YELLOW}Select the whole device, such as /dev/sdb.{RESET}\n");
     println!("{GREEN}No filesystem scanning. No custom browser. Just pick and flash.{RESET}\n");
+    println!("{CYAN}Ctrl+C or 'q' cancels at any prompt.{RESET}");
     println!("Press Enter to list removable devices.");
     let _ = io::stdout().flush();
     let _ = prompt("");
