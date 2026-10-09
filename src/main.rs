@@ -248,6 +248,24 @@ fn title_screen() {
     let _ = prompt("");
 }
 
+/// Child mode: show the desktop file chooser and print the chosen path.
+///
+/// Exit codes are a small protocol for the parent: 0 with a path on stdout,
+/// 2 when the user cancelled, 1 on failure with the reason on stderr.
+fn run_internal_choose_iso() -> ! {
+    match select::choose_iso() {
+        Ok(path) => {
+            println!("{}", path.display());
+            std::process::exit(0);
+        }
+        Err(select::SelectionError::Cancelled) => std::process::exit(2),
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Resolve both the ISO and the target device.
 fn interactive() -> io::Result<(PathBuf, PathBuf)> {
     title_screen();
@@ -259,7 +277,9 @@ fn interactive() -> io::Result<(PathBuf, PathBuf)> {
         device.describe()
     );
 
-    let iso = select::choose_iso().map_err(selection_to_io)?;
+    // Runs as the desktop user when we are root, so the portal works.
+    let iso = select::choose_iso_as_desktop_user().map_err(selection_to_io)?;
+    println!("{CYAN}Image{RESET}   {}", iso.display());
     Ok((iso, device.path))
 }
 
@@ -299,6 +319,10 @@ fn parse_args() -> Cli {
                 }
             }
             "-f" | "--force" => cli.force = true,
+            // Internal: run the chooser as the desktop user and print the path.
+            "--internal-choose-iso" => {
+                run_internal_choose_iso();
+            }
             "-h" | "--help" => {
                 println!(
                     "iso-flasher 2.0.0\n\n\
@@ -546,7 +570,11 @@ fn run() -> io::Result<()> {
 }
 
 fn main() {
-    clear_screen();
+    // In child mode stdout is a pipe carrying the chosen path, so the terminal
+    // must not be cleared or coloured here.
+    if env::args().nth(1).as_deref() != Some("--internal-choose-iso") {
+        clear_screen();
+    }
 
     if let Err(error) = run() {
         // A user-cancelled selection is a normal outcome, not a failure.

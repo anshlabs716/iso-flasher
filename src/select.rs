@@ -7,6 +7,7 @@
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::devices::{self, BlockDevice};
 use crate::helpers::{self, FallbackOutcome};
@@ -150,6 +151,70 @@ pub fn choose_iso() -> Result<PathBuf, SelectionError> {
     Ok(selected)
 }
 
+/// Run the interactive selection as the desktop user when we are root.
+///
+/// A root process cannot use the desktop's file chooser: the session bus
+/// belongs to the desktop user and D-Bus authentication rejects the root
+/// caller. Every distro solves this the same way, by doing the GUI part as the
+/// user and keeping privilege only for the write. So when we are root we hand
+/// the whole selection step to a child process running as the desktop user,
+/// which returns the chosen ISO path on stdout.
+pub fn choose_iso_as_desktop_user() -> Result<PathBuf, SelectionError> {
+    if !crate::session::needs_privilege_drop() {
+        return choose_iso();
+    }
+
+    let executable = std::env::current_exe()
+        .map_err(|error| SelectionError::Failed(format!("cannot locate iso-flasher: {error}")))?;
+
+    let mut command = Command::new(executable);
+    command.arg("--internal-choose-iso");
+
+    use std::os::unix::process::CommandExt;
+
+    // The child runs as the desktop user so the portal accepts it; it only ever
+    // shows the chooser, never the privileged flashing code.
+    command.uid(crate::session::invoking_uid().expect("checked"));
+    if let Some(gid) = crate::session::invoking_gid() {
+        command.gid(gid);
+    }
+
+    for (key, value) in crate::session::user_environment() {
+        command.env(key, value);
+    }
+
+    // Clear anything sudo injected so the child looks like a normal session.
+    for key in ["SUDO_UID", "SUDO_GID", "SUDO_USER"] {
+        command.env_remove(key);
+    }
+
+    let output = command.output().map_err(|error| {
+        SelectionError::Failed(format!("could not start the file chooser: {error}"))
+    })?;
+
+    // The child reports a cancelled selection with a dedicated exit code.
+    if output.status.code() == Some(2) {
+        return Err(SelectionError::Cancelled);
+    }
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(SelectionError::Failed(if stderr.is_empty() {
+            "the file chooser did not return a selection".to_owned()
+        } else {
+            stderr
+        }));
+    }
+
+    let chosen = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if chosen.is_empty() {
+        return Err(SelectionError::Cancelled);
+    }
+
+    validate_iso(Path::new(&chosen))?;
+    Ok(PathBuf::from(chosen))
+}
+
 /// Which chooser a user would currently get, for `--help` style reporting.
 pub fn describe_backend() -> String {
     let desktop = crate::session::desktop_environment()
@@ -173,14 +238,14 @@ pub fn explain_portal_failure() {
     let address = match crate::session::session_bus_address() {
         crate::session::BusAddress::Explicit(address) => address,
         crate::session::BusAddress::Unavailable => {
-            println!(
+            eprintln!(
                 "{YELLOW}No session bus address found. Run under your desktop session (not a bare tty).{RESET}"
             );
             return;
         }
     };
 
-    println!(
+    eprintln!(
         "{YELLOW}XDG file chooser portal unavailable (bus: {address}).{RESET}\n\
          {YELLOW}Falling back to a helper dialog, which may look like a plain file manager.{RESET}\n\
          {YELLOW}To restore the native dialog: sudo apt install xdg-desktop-portal xdg-desktop-portal-kde{RESET}"

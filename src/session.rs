@@ -70,6 +70,88 @@ fn non_empty_var(key: &str) -> Option<String> {
     env::var(key).ok().filter(|value| !value.trim().is_empty())
 }
 
+/// The primary group of the desktop user, needed to fully drop privileges.
+pub fn invoking_gid() -> Option<u32> {
+    for key in ["SUDO_GID", "PKEXEC_GID"] {
+        if let Some(gid) = non_empty_var(key).and_then(|raw| raw.parse::<u32>().ok()) {
+            if gid != 0 {
+                return Some(gid);
+            }
+        }
+    }
+
+    non_empty_var("USER")
+        .and_then(|user| passwd_field(&user, 3))
+        .and_then(|gid| gid.parse::<u32>().ok())
+}
+
+/// Look up one colon-separated `/etc/passwd` field by user name.
+fn passwd_field(user: &str, index: usize) -> Option<String> {
+    let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+
+    for line in passwd.lines() {
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() > index && fields[0] == user {
+            return Some(fields[index].to_owned());
+        }
+    }
+
+    None
+}
+
+/// Environment needed to talk to the desktop session as the desktop user.
+pub fn user_environment() -> Vec<(String, String)> {
+    let mut environment = Vec::new();
+
+    if let Some(uid) = invoking_uid() {
+        let runtime = format!("/run/user/{uid}");
+        environment.push(("XDG_RUNTIME_DIR".to_owned(), runtime.clone()));
+        environment.push((
+            "DBUS_SESSION_BUS_ADDRESS".to_owned(),
+            format!("unix:path={runtime}/bus"),
+        ));
+    }
+
+    if let Some(home) = invoking_user_home() {
+        environment.push(("HOME".to_owned(), home.to_string_lossy().into_owned()));
+    }
+
+    if let Some(user) = non_empty_var("USER") {
+        environment.push(("USER".to_owned(), user));
+    }
+
+    if let Some(display) = non_empty_var("DISPLAY") {
+        environment.push(("DISPLAY".to_owned(), display));
+    }
+
+    if let Some(wayland) = non_empty_var("WAYLAND_DISPLAY") {
+        environment.push(("WAYLAND_DISPLAY".to_owned(), wayland));
+        environment.push(("XDG_SESSION_TYPE".to_owned(), "wayland".to_owned()));
+    }
+
+    if let Some(kind) = non_empty_var("XDG_CURRENT_DESKTOP") {
+        environment.push(("XDG_CURRENT_DESKTOP".to_owned(), kind));
+    }
+
+    // PATH so the child can still find ordinary programs.
+    if let Some(path) = non_empty_var("PATH") {
+        environment.push(("PATH".to_owned(), path));
+    }
+
+    environment
+}
+
+/// True when we are root but a desktop user invoked us, so the GUI step must
+/// be run as that user.
+pub fn needs_privilege_drop() -> bool {
+    let is_root = unsafe { geteuid() == 0 };
+    is_root && invoking_uid().is_some()
+}
+
+extern "C" {
+    fn geteuid() -> u32;
+}
+
 /// UID of the user who invoked sudo/polkit, if we escalated from another user.
 pub fn invoking_uid() -> Option<u32> {
     for key in ["SUDO_UID", "PKEXEC_UID"] {
@@ -202,6 +284,35 @@ mod tests {
 #[cfg(test)]
 mod home_tests {
     use super::*;
+
+    #[test]
+    fn user_environment_points_at_the_desktop_session() {
+        unsafe {
+            std::env::set_var("SUDO_UID", "1000");
+            std::env::set_var("SUDO_GID", "1000");
+        }
+
+        let environment = user_environment();
+        let find = |key: &str| {
+            environment
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        };
+
+        // Must target the user's runtime dir, not root's.
+        assert_eq!(
+            find("DBUS_SESSION_BUS_ADDRESS").as_deref(),
+            Some("unix:path=/run/user/1000/bus")
+        );
+        assert_eq!(find("XDG_RUNTIME_DIR").as_deref(), Some("/run/user/1000"));
+        assert!(find("HOME").is_some_and(|home| home != "/root"));
+
+        unsafe {
+            std::env::remove_var("SUDO_UID");
+            std::env::remove_var("SUDO_GID");
+        }
+    }
 
     #[test]
     fn home_is_recovered_even_when_env_points_at_root() {
