@@ -10,6 +10,8 @@ use std::{
 };
 
 mod devices;
+#[cfg(feature = "gui")]
+mod gui;
 mod helpers;
 mod portal;
 mod select;
@@ -285,7 +287,8 @@ fn interactive() -> io::Result<(PathBuf, PathBuf)> {
 
 fn selection_to_io(error: select::SelectionError) -> io::Error {
     match error {
-        select::SelectionError::Cancelled => {
+        // The user changing their mind is not a failure.
+        error if error.is_cancelled() => {
             io::Error::new(io::ErrorKind::Interrupted, "cancelled by user")
         }
         other => io::Error::other(other.to_string()),
@@ -297,6 +300,8 @@ struct Cli {
     iso: Option<PathBuf>,
     device: Option<PathBuf>,
     force: bool,
+    /// Launch the graphical window instead of the terminal interface.
+    gui: bool,
 }
 
 fn parse_args() -> Cli {
@@ -319,6 +324,7 @@ fn parse_args() -> Cli {
                 }
             }
             "-f" | "--force" => cli.force = true,
+            "--gui" => cli.gui = true,
             // Internal: run the chooser as the desktop user and print the path.
             "--internal-choose-iso" => {
                 run_internal_choose_iso();
@@ -331,6 +337,7 @@ fn parse_args() -> Cli {
                      XDG Desktop Portal, so KDE, GNOME, Xfce, Cinnamon, MATE, Budgie,\n\
                      LXQt and COSMIC all work on Wayland and X11 without extra packages.\n\
                      kdialog/zenity/yad are used only if no portal is available.\n\n\
+                     --gui                     open the graphical window (needs --features gui)
                      USB devices are not files, so they are listed from sysfs with their\n\
                      model and capacity rather than shown in a file picker. Partitions\n\
                      such as /dev/sdb1 are always rejected.\n\n\
@@ -453,19 +460,53 @@ fn flush_device(output: &File) -> io::Result<()> {
     Ok(())
 }
 
-fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
+/// Progress of an in-flight flash.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Progress {
+    pub written: u64,
+    pub total: u64,
+    /// Throughput in MiB/s.
+    pub speed: f64,
+    /// Estimated seconds remaining.
+    pub eta: f64,
+}
+
+impl Progress {
+    pub fn percentage(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (self.written as f64 * 100.0 / self.total as f64).min(100.0)
+    }
+}
+
+/// Write an ISO to a device, reporting progress through a callback.
+///
+/// This is the UI-agnostic core shared by the terminal UI and the GTK window.
+/// `on_progress` is called after each chunk; `should_cancel` is polled once per
+/// chunk, so cancelling takes effect within one buffer.
+pub fn flash_with_progress(
+    iso: &Path,
+    device: &Path,
+    total: u64,
+    mut on_progress: impl FnMut(Progress),
+    should_cancel: impl Fn() -> bool,
+) -> io::Result<()> {
     let mut input = File::open(iso)?;
     let mut output = OpenOptions::new().write(true).open(device)?;
-    let _terminal = TerminalGuard::raw()?;
 
     let mut buffer = vec![0_u8; BUFFER_SIZE];
-    let mut snake = Snake::new();
-    let mut snake_mode = false;
-    let mut last_snake_update = Instant::now();
     let start = Instant::now();
     let mut written = 0_u64;
 
-    while RUNNING.load(Ordering::SeqCst) {
+    loop {
+        if should_cancel() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "flash cancelled",
+            ));
+        }
+
         let count = input.read(&mut buffer)?;
         if count == 0 {
             break;
@@ -474,54 +515,20 @@ fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
         write_all_buffer(&mut output, &buffer[..count])?;
         written += count as u64;
 
-        while let Some(key) = read_key() {
-            handle_flash_key(key, &mut snake, &mut snake_mode);
-        }
-
         let elapsed = start.elapsed().as_secs_f64().max(0.001);
         let speed = written as f64 / 1_048_576.0 / elapsed;
-        let percentage = (written as f64 * 100.0 / total as f64).min(100.0);
         let remaining = total.saturating_sub(written);
-        let eta = if speed > 0.0 {
-            remaining as f64 / 1_048_576.0 / speed
-        } else {
-            0.0
-        };
 
-        if snake_mode {
-            if last_snake_update.elapsed() >= Duration::from_millis(120) {
-                snake.step();
-                last_snake_update = Instant::now();
-            }
-            draw_snake(&snake, percentage);
-        } else {
-            clear_screen();
-            println!("{CYAN}{BOLD}ISO FLASHER{RESET}\n");
-            println!("Device  {BOLD}{}{RESET}", device.display());
-            println!("Image   {}", iso.display());
-            println!(
-                "\n[{:<42}] {:>5.1}%\n",
-                "=".repeat((percentage * 42.0 / 100.0) as usize),
-                percentage
-            );
-            println!("Speed   {:>7.1} MiB/s", speed);
-            println!(
-                "ETA     {:02}m {:02}s",
-                (eta as u64) / 60,
-                (eta as u64) % 60
-            );
-            println!("\n{YELLOW}Shift+Tab{RESET} Snake    Ctrl+C Cancel");
-            println!("{YELLOW}Press Ctrl+C to cancel the flash at any time.{RESET}");
-        }
-
-        io::stdout().flush()?;
-    }
-
-    if !RUNNING.load(Ordering::SeqCst) {
-        return Err(io::Error::new(
-            io::ErrorKind::Interrupted,
-            "flash cancelled",
-        ));
+        on_progress(Progress {
+            written,
+            total,
+            speed,
+            eta: if speed > 0.0 {
+                remaining as f64 / 1_048_576.0 / speed
+            } else {
+                0.0
+            },
+        });
     }
 
     if written != total {
@@ -534,6 +541,59 @@ fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
     flush_device(&output)
 }
 
+fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
+    let mut snake = Snake::new();
+    let mut snake_mode = false;
+    let mut last_snake_update = Instant::now();
+
+    // Keep the terminal in raw mode only for the interactive view.
+    let _terminal = TerminalGuard::raw()?;
+
+    let result = flash_with_progress(
+        iso,
+        device,
+        total,
+        |progress| {
+            while let Some(key) = read_key() {
+                handle_flash_key(key, &mut snake, &mut snake_mode);
+            }
+
+            let percentage = progress.percentage();
+
+            if snake_mode {
+                if last_snake_update.elapsed() >= Duration::from_millis(120) {
+                    snake.step();
+                    last_snake_update = Instant::now();
+                }
+                draw_snake(&snake, percentage);
+            } else {
+                clear_screen();
+                println!("{CYAN}{BOLD}ISO FLASHER{RESET}\n");
+                println!("Device  {BOLD}{}{RESET}", device.display());
+                println!("Image   {}", iso.display());
+                println!(
+                    "\n[{:<42}] {:>5.1}%\n",
+                    "=".repeat((percentage * 42.0 / 100.0) as usize),
+                    percentage
+                );
+                println!("Speed   {:>7.1} MiB/s", progress.speed);
+                println!(
+                    "ETA     {:02}m {:02}s",
+                    (progress.eta as u64) / 60,
+                    (progress.eta as u64) % 60
+                );
+                println!("\n{YELLOW}Shift+Tab{RESET} Snake    Ctrl+C Cancel");
+                println!("{YELLOW}Press Ctrl+C to cancel the flash at any time.{RESET}");
+            }
+
+            let _ = io::stdout().flush();
+        },
+        || !RUNNING.load(Ordering::SeqCst),
+    );
+
+    result
+}
+
 fn run() -> io::Result<()> {
     unsafe {
         signal(SIGINT, stop as *const () as usize);
@@ -541,6 +601,13 @@ fn run() -> io::Result<()> {
 
     // Parse arguments first so `--help` works without root.
     let cli = parse_args();
+
+    // The GUI is handled before the root check: it runs as the desktop user
+    // and only escalates for the write itself.
+    #[cfg(feature = "gui")]
+    if cli.gui {
+        std::process::exit(gui::run());
+    }
 
     if unsafe { geteuid() } != 0 {
         return Err(io::Error::new(

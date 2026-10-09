@@ -24,7 +24,7 @@ const YELLOW: &str = "\x1b[33m";
 /// The globs are a convenience only. The portal is explicitly allowed to return
 /// something that matches no filter, and we validate the result ourselves, so a
 /// valid ISO called `image.bin` can still be chosen.
-fn iso_filters() -> Vec<FileFilter> {
+pub fn iso_filters() -> Vec<FileFilter> {
     vec![FileFilter {
         name: "ISO images".to_owned(),
         globs: vec![
@@ -38,7 +38,7 @@ fn iso_filters() -> Vec<FileFilter> {
 }
 
 /// Why a selection ended without a usable answer.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectionError {
     /// The user deliberately backed out. Never treated as a flashing failure.
     Cancelled,
@@ -59,6 +59,13 @@ impl fmt::Display for SelectionError {
 }
 
 impl std::error::Error for SelectionError {}
+
+impl SelectionError {
+    /// Whether this outcome was simply the user changing their mind.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, SelectionError::Cancelled)
+    }
+}
 
 impl From<io::Error> for SelectionError {
     fn from(error: io::Error) -> Self {
@@ -131,7 +138,7 @@ pub fn validate_iso(path: &Path) -> io::Result<PathBuf> {
 ///
 /// `sudo` rewrites `HOME` to `/root`, which is wrong and usually unreadable to
 /// the desktop session, so recover the invoking user's home from `SUDO_UID`.
-fn starting_directory() -> PathBuf {
+pub fn starting_directory() -> PathBuf {
     if let Some(home) = crate::session::invoking_user_home() {
         if home.is_dir() {
             return home;

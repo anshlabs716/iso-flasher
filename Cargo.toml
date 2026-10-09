@@ -10,6 +10,14 @@ license = "MIT"
 # (org.freedesktop.portal.FileChooser) so the desktop's own dialog is shown.
 zbus = { version = "5", features = ["blocking-api"] }
 
+# GTK4 for the optional graphical window (`iso-flasher --gui`). Only linked in
+# when the `gui` feature is enabled, so the CLI stays dependency-light.
+gtk = { version = "0.11", package = "gtk4", optional = true }
+
+[features]
+default = []
+gui = ["dep:gtk"]
+
 [[bin]]
 name = "iso-flasher"
 path = "src/main.rs"
