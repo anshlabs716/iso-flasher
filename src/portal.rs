@@ -41,8 +41,14 @@ trait FileChooser {
     gen_blocking = true
 )]
 trait Request {
+    fn close(&self) -> zbus::Result<()>;
+
     #[zbus(signal)]
-    fn response(&self, response: u32, results: HashMap<&str, Value<'_>>) -> zbus::Result<()>;
+    fn response(
+        &self,
+        response: u32,
+        results: HashMap<String, zbus::zvariant::OwnedValue>,
+    ) -> zbus::Result<()>;
 }
 
 /// Why a file could not be chosen.
@@ -199,34 +205,32 @@ pub fn choose_file(
         .open_file("", title, options)
         .map_err(|error| PickerError::Unavailable(error.to_string()))?;
 
-    let request = zbus::blocking::Proxy::new(
-        &connection,
-        PORTAL_BUS_NAME,
-        handle.as_ref(),
-        "org.freedesktop.portal.Request",
-    )
-    .map_err(|error| PickerError::Portal(error.to_string()))?;
+    let request = RequestProxyBlocking::builder(&connection)
+        .destination(PORTAL_BUS_NAME)
+        .map_err(|error| PickerError::Portal(error.to_string()))?
+        .path(handle.clone())
+        .map_err(|error| PickerError::Portal(error.to_string()))?
+        .build()
+        .map_err(|error| PickerError::Portal(error.to_string()))?;
 
-    // Subscribe before returning so the reply cannot be missed.
+    // Subscribe before waiting so the reply cannot be missed.
     let mut responses = request
-        .receive_signal("Response")
+        .receive_response()
         .map_err(|error| PickerError::Portal(error.to_string()))?;
 
     let Some(message) = responses.next() else {
-        let _ = request.call_method("Close", &());
+        let _ = request.close();
         return Err(PickerError::Portal(
             "portal closed without responding".to_owned(),
         ));
     };
 
-    let _ = request.call_method("Close", &());
-
-    let body = message.body();
-    let payload: Value<'_> = body
-        .deserialize()
+    let args = message
+        .args()
         .map_err(|error| PickerError::Portal(error.to_string()))?;
+    let (code, results) = (args.response, args.results);
 
-    parse_response(&payload)
+    parse_response(code, results)
 }
 
 fn build_current_filter(filter: &FileFilter) -> Value<'static> {
@@ -247,71 +251,30 @@ fn build_current_filter(filter: &FileFilter) -> Value<'static> {
     zbus::zvariant::Value::new(entry)
 }
 
-/// Interpret the `Response` signal payload: `(u response, a{sv} results)`.
-fn parse_response(payload: &zbus::zvariant::Value<'_>) -> Result<std::path::PathBuf, PickerError> {
-    let zbus::zvariant::Value::Structure(fields) = payload else {
-        return Err(PickerError::Portal("malformed response".to_owned()));
-    };
-
-    let fields = fields.fields();
-    let Some(code) = fields
-        .first()
-        .and_then(|value| value.downcast_ref::<u32>().ok())
-    else {
-        return Err(PickerError::Portal("missing response code".to_owned()));
-    };
-
+/// Interpret a decoded `Response` signal: a response code plus a results map.
+///
+/// Typed decoding matters here: the raw signal body is `(ua{sv})`, so decoding
+/// it as a bare `Value` fails with a signature mismatch and every successful
+/// selection would be reported as an error.
+pub fn parse_response(
+    code: u32,
+    results: HashMap<String, zbus::zvariant::OwnedValue>,
+) -> Result<std::path::PathBuf, PickerError> {
     match code {
         RESPONSE_SUCCESS => {}
         RESPONSE_CANCELLED => return Err(PickerError::Cancelled),
         // RESPONSE_OTHER and anything a future backend invents.
-        _ => {
-            let detail = fields
-                .get(1)
-                .and_then(|value| {
-                    value
-                        .downcast_ref::<zbus::zvariant::Str>()
-                        .ok()
-                        .map(|s| s.to_string())
-                })
-                .unwrap_or_else(|| "unspecified portal error".to_owned());
-            return Err(PickerError::Portal(format!(
-                "portal refused the request: {detail}"
-            )));
-        }
+        _ => return Err(PickerError::Portal("portal refused the request".to_owned())),
     }
 
-    let results = fields
-        .get(1)
-        .and_then(|value| value.downcast_ref::<zbus::zvariant::Dict<'_, '_>>().ok());
-    let Some(results) = results else {
-        return Err(PickerError::Portal(
-            "response carried no results".to_owned(),
-        ));
-    };
-
-    for (key, value) in results.iter() {
-        let is_uris = matches!(
-            key.downcast_ref::<zbus::zvariant::Str>()
-                .ok()
-                .map(|name| name.to_string())
-                .as_deref(),
-            Some("uris")
-        );
-        if !is_uris {
-            continue;
-        }
-
-        let zbus::zvariant::Value::Array(uris) = value else {
-            continue;
-        };
-
-        for uri in uris.iter() {
-            let Some(text) = uri.downcast_ref::<zbus::zvariant::Str>().ok() else {
-                continue;
-            };
-            if let Some(path) = uri_to_path(text.as_str()) {
-                return Ok(path);
+    if let Some(uris) = results.get("uris") {
+        // `uris` is an array of strings wrapped in a variant.
+        let owned = uris.clone();
+        if let Ok(list) = <Vec<String> as TryFrom<zbus::zvariant::OwnedValue>>::try_from(owned) {
+            for uri in list {
+                if let Some(path) = uri_to_path(&uri) {
+                    return Ok(path);
+                }
             }
         }
     }
@@ -384,12 +347,54 @@ mod tests {
     #[test]
     fn cancellation_is_not_an_error_state() {
         // Response code 1 must map to Cancelled so callers can exit quietly.
-        // Response payload: (1, {}) -- cancelled with no results.
-        let payload = zbus::zvariant::Structure::from((1_u32, HashMap::<&str, Value<'_>>::new()));
-        let value = zbus::zvariant::Value::new(payload);
         assert!(matches!(
-            parse_response(&value),
+            parse_response(1, HashMap::new()),
             Err(PickerError::Cancelled)
         ));
+    }
+
+    #[test]
+    fn successful_selection_decodes_to_a_path() {
+        // This is the regression test for "press Open and nothing happens":
+        // the `uris` entry arrives as a variant-wrapped array of strings, and
+        // decoding it as a bare Value used to fail with a signature mismatch.
+        let uris: Vec<String> = vec!["file:///tmp/TinyCore-current.iso".to_owned()];
+        let mut results: HashMap<String, zbus::zvariant::OwnedValue> = HashMap::new();
+        results.insert(
+            "uris".to_owned(),
+            zbus::zvariant::OwnedValue::try_from(Value::from(uris)).expect("own uris"),
+        );
+
+        let path = parse_response(0, results).expect("a chosen file must decode");
+        assert_eq!(path, std::path::PathBuf::from("/tmp/TinyCore-current.iso"));
+    }
+
+    #[test]
+    fn spaces_in_chosen_names_are_decoded() {
+        let uris: Vec<String> = vec!["file:///home/ansh/My%20Linux.iso".to_owned()];
+        let mut results: HashMap<String, zbus::zvariant::OwnedValue> = HashMap::new();
+        results.insert(
+            "uris".to_owned(),
+            zbus::zvariant::OwnedValue::try_from(Value::from(uris)).expect("own uris"),
+        );
+
+        assert_eq!(
+            parse_response(0, results).expect("decode"),
+            std::path::PathBuf::from("/home/ansh/My Linux.iso")
+        );
+    }
+
+    #[test]
+    fn success_without_uris_is_treated_as_cancelled() {
+        assert!(matches!(
+            parse_response(0, HashMap::new()),
+            Err(PickerError::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn unknown_response_codes_are_errors_not_cancellations() {
+        let outcome = parse_response(2, HashMap::new());
+        assert!(matches!(outcome, Err(PickerError::Portal(_))));
     }
 }
