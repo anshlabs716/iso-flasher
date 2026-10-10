@@ -49,11 +49,6 @@ cd iso-flasher
 sudo apt install -y libgtk-4-dev pkg-config
 cargo build --release --features gui
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
-```
-
-Run the GUI with:
-
-```bash
 iso-flasher --gui
 ```
 
