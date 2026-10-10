@@ -16,15 +16,13 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-
-use futures::channel::oneshot;
+use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{
-    glib, Application, ApplicationWindow, Button, Label, ListBox, ListBoxRow, Orientation,
-    ProgressBar,
+    glib, Application, ApplicationWindow, Button, Label, ListBox, ListBoxRow, Orientation, ProgressBar,
 };
 
 use crate::devices::{self, BlockDevice};
@@ -147,29 +145,62 @@ fn build_window(application: &Application) {
         button.set_sensitive(false);
         label.set_text("Opening your desktop file dialog…");
 
-        let (tx, rx) = oneshot::channel();
+        // Use a simple channel with a background thread and main-loop polling
+        let (tx, rx) = channel::<Result<PathBuf, select::SelectionError>>();
         thread::spawn(move || {
             let outcome = select::choose_iso();
             let _ = tx.send(outcome);
         });
 
-        glib::MainContext::default().spawn_local(async move {
-            let outcome = rx.await.expect("sender dropped");
-            button.set_sensitive(true);
+        // Poll for the result on the GTK main loop using a timeout
+        let rx = Arc::new(Mutex::new(rx));
 
-            match outcome {
-                Ok(path) => {
-                    label.set_text(&path.display().to_string());
-                    *state.selected_iso.borrow_mut() = Some(path);
-                }
-                Err(error) if error.is_cancelled() => {
-                    label.set_text("No image selected");
-                }
-                Err(error) => {
-                    label.set_text(&format!("Could not open the file dialog: {error}"));
+        // Define the polling closure
+        let poll_iso_result = {
+            let rx = Arc::clone(&rx);
+            let button = button.clone();
+            let label = label.clone();  // Use `label` (already cloned) instead of `choose_label`
+            let state = Arc::clone(&state);
+            move || {
+                let outcome = {
+                    let rx = rx.lock().unwrap();
+                    rx.try_recv()
+                };
+
+                match outcome {
+                    Ok(Ok(path)) => {
+                        label.set_text(&path.display().to_string());
+                        *state.selected_iso.borrow_mut() = Some(path);
+                        button.set_sensitive(true);
+                    }
+                    Ok(Err(error)) if error.is_cancelled() => {
+                        label.set_text("No image selected");
+                        button.set_sensitive(true);
+                    }
+                    Ok(Err(error)) => {
+                        label.set_text(&format!("Could not open the file dialog: {error}"));
+                        button.set_sensitive(true);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // Still waiting, re-arm
+                        let rx = Arc::clone(&rx);
+                        let button = button.clone();
+                        let label = label.clone();  // Use `label` instead of `choose_label`
+                        let state = Arc::clone(&state);
+                        glib::timeout_add_local_once(Duration::from_millis(50), move || {
+                            poll_iso_result_recursive(rx, button, label, state);
+                        });
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        label.set_text("File dialog closed unexpectedly");
+                        button.set_sensitive(true);
+                    }
                 }
             }
-        });
+        };
+
+        // Start polling
+        glib::idle_add_local_once(poll_iso_result);
     });
     root.append(&choose);
 
@@ -221,9 +252,7 @@ fn build_window(application: &Application) {
             return;
         }
 
-        flash_status.set_text(
-            "Authorising… your desktop will ask for your password to write to a raw device.",
-        );
+        flash_status.set_text("Authorising… your desktop will ask for your password to write to a raw device.");
         button.set_sensitive(false);
         flash_cancel.set_sensitive(true);
         flash_progress.set_fraction(0.0);
@@ -246,6 +275,49 @@ fn build_window(application: &Application) {
 
     window.set_child(Some(&root));
     window.present();
+}
+
+/// Recursive helper for polling the ISO selection result.
+fn poll_iso_result_recursive(
+    rx: Arc<Mutex<Receiver<Result<PathBuf, select::SelectionError>>>>,
+    button: Button,
+    label: Label,
+    state: Arc<State>,
+) {
+    let outcome = {
+        let rx = rx.lock().unwrap();
+        rx.try_recv()
+    };
+
+    match outcome {
+        Ok(Ok(path)) => {
+            label.set_text(&path.display().to_string());
+            *state.selected_iso.borrow_mut() = Some(path);
+            button.set_sensitive(true);
+        }
+        Ok(Err(error)) if error.is_cancelled() => {
+            label.set_text("No image selected");
+            button.set_sensitive(true);
+        }
+        Ok(Err(error)) => {
+            label.set_text(&format!("Could not open the file dialog: {error}"));
+            button.set_sensitive(true);
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => {
+            // Still waiting, re-arm
+            let rx = rx.clone();
+            let button = button.clone();
+            let label = label.clone();
+            let state = Arc::clone(&state);
+            glib::timeout_add_local_once(Duration::from_millis(50), move || {
+                poll_iso_result_recursive(rx, button, label, state);
+            });
+        }
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            label.set_text("File dialog closed unexpectedly");
+            button.set_sensitive(true);
+        }
+    }
 }
 
 /// Fill the device list with removable whole block devices.
@@ -296,11 +368,7 @@ fn populate_devices(list: &ListBox, state: &Arc<State>) {
 
     // Preselect when there is only one obvious choice.
     if list.first_child().is_some() {
-        list.select_row(
-            list.first_child()
-                .and_then(|child| child.downcast::<gtk::ListBoxRow>().ok())
-                .as_ref(),
-        );
+        list.select_row(list.first_child().and_then(|child| child.downcast::<gtk::ListBoxRow>().ok()).as_ref());
     }
 }
 
@@ -367,73 +435,133 @@ fn start_flash(
     });
 
     // Drain the channel on the GTK main loop, re-arming until finished.
-    fn poll(
-        rx: &Receiver<FlashEvent>,
-        progress_bar: &ProgressBar,
-        status: &Label,
-        cancel_button: &Button,
-        iso: &Path,
-        device: &BlockDevice,
-    ) -> glib::Propagation {
-        let mut finished = false;
+    let rx = Arc::new(Mutex::new(rx));
+    let poll = {
+        let rx = Arc::clone(&rx);
+        let progress_bar = progress_bar.clone();
+        let status = status.clone();
+        let cancel_button = cancel_button.clone();
+        let iso = iso_for_poll.clone();
+        let device = device_for_poll.clone();
 
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                FlashEvent::Progress(progress) => {
-                    let fraction = (progress.percentage() / 100.0).clamp(0.0, 1.0);
-                    progress_bar.set_fraction(fraction);
-                    progress_bar.set_text(Some(&format!("{:.1}%", progress.percentage())));
-                    status.set_text(&format!(
-                        "{:.1} MiB/s · about {} left",
-                        progress.speed,
-                        humanise_seconds(progress.eta)
-                    ));
-                }
-                FlashEvent::Done => {
-                    finished = true;
-                    progress_bar.set_fraction(1.0);
-                    progress_bar.set_text(Some("Done"));
-                    status.set_text(&format!("Wrote {} to /dev/{}", iso.display(), device.name));
-                    cancel_button.set_sensitive(false);
-                }
-                FlashEvent::NotAuthorised => {
-                    finished = true;
-                    status.set_text("Not authorised. Nothing was written.");
-                    cancel_button.set_sensitive(false);
-                }
-                FlashEvent::Failed(message) => {
-                    finished = true;
-                    status.set_text(&format!("Failed: {message}"));
-                    cancel_button.set_sensitive(false);
+        move || -> glib::Propagation {
+            let mut finished = false;
+
+            while let Ok(event) = {
+                let rx = rx.lock().unwrap();
+                rx.try_recv()
+            } {
+                match event {
+                    FlashEvent::Progress(progress) => {
+                        let fraction = (progress.percentage() / 100.0).clamp(0.0, 1.0);
+                        progress_bar.set_fraction(fraction);
+                        progress_bar.set_text(Some(&format!("{:.1}%", progress.percentage())));
+                        status.set_text(&format!(
+                            "{:.1} MiB/s · about {} left",
+                            progress.speed,
+                            humanise_seconds(progress.eta)
+                        ));
+                    }
+                    FlashEvent::Done => {
+                        finished = true;
+                        progress_bar.set_fraction(1.0);
+                        progress_bar.set_text(Some("Done"));
+                        status.set_text(&format!("Wrote {} to /dev/{}", iso.display(), device.name));
+                        cancel_button.set_sensitive(false);
+                    }
+                    FlashEvent::NotAuthorised => {
+                        finished = true;
+                        status.set_text("Not authorised. Nothing was written.");
+                        cancel_button.set_sensitive(false);
+                    }
+                    FlashEvent::Failed(message) => {
+                        finished = true;
+                        status.set_text(&format!("Failed: {message}"));
+                        cancel_button.set_sensitive(false);
+                    }
                 }
             }
-        }
 
-        if !finished {
-            glib::timeout_add_local_once(std::time::Duration::from_millis(60), move || {
-                // We can't call poll recursively here because it's a fn item.
-                // Instead, we use idle_add to re-arm.
-                glib::idle_add_local_once(move || {
-                    // The next iteration will be scheduled by the next idle
-                    // This is a bit of a hack; the proper fix is a module-level poll.
+            if !finished {
+                let rx = Arc::clone(&rx);
+                let progress_bar = progress_bar.clone();
+                let status = status.clone();
+                let cancel_button = cancel_button.clone();
+                let iso = iso.clone();
+                let device = device.clone();
+                glib::timeout_add_local_once(Duration::from_millis(60), move || {
+                    poll_flash_progress(rx, progress_bar, status, cancel_button, iso, device);
                 });
-            });
-        }
+            }
 
-        glib::Propagation::Proceed
-    }
+            glib::Propagation::Proceed
+        }
+    };
 
     glib::idle_add_local_once(move || {
-        // The first poll will re-arm via timeout_add until finished
-        poll(
-            &rx,
-            &progress_bar,
-            &status,
-            &cancel_button,
-            &iso_for_poll,
-            &device_for_poll,
-        );
+        poll_flash_progress(rx, progress_bar.clone(), status.clone(), cancel_button.clone(), iso_for_poll, device_for_poll);
     });
+}
+
+/// Recursive helper for polling flash progress.
+fn poll_flash_progress(
+    rx: Arc<Mutex<Receiver<FlashEvent>>>,
+    progress_bar: ProgressBar,
+    status: Label,
+    cancel_button: Button,
+    iso: PathBuf,
+    device: BlockDevice,
+) -> glib::Propagation {
+    let mut finished = false;
+
+    while let Ok(event) = {
+        let rx = rx.lock().unwrap();
+        rx.try_recv()
+    } {
+        match event {
+            FlashEvent::Progress(progress) => {
+                let fraction = (progress.percentage() / 100.0).clamp(0.0, 1.0);
+                progress_bar.set_fraction(fraction);
+                progress_bar.set_text(Some(&format!("{:.1}%", progress.percentage())));
+                status.set_text(&format!(
+                    "{:.1} MiB/s · about {} left",
+                    progress.speed,
+                    humanise_seconds(progress.eta)
+                ));
+            }
+            FlashEvent::Done => {
+                finished = true;
+                progress_bar.set_fraction(1.0);
+                progress_bar.set_text(Some("Done"));
+                status.set_text(&format!("Wrote {} to /dev/{}", iso.display(), device.name));
+                cancel_button.set_sensitive(false);
+            }
+            FlashEvent::NotAuthorised => {
+                finished = true;
+                status.set_text("Not authorised. Nothing was written.");
+                cancel_button.set_sensitive(false);
+            }
+            FlashEvent::Failed(message) => {
+                finished = true;
+                status.set_text(&format!("Failed: {message}"));
+                cancel_button.set_sensitive(false);
+            }
+        }
+    }
+
+    if !finished {
+        let rx = rx.clone();
+        let progress_bar = progress_bar.clone();
+        let status = status.clone();
+        let cancel_button = cancel_button.clone();
+        let iso = iso.clone();
+        let device = device.clone();
+        glib::timeout_add_local_once(Duration::from_millis(60), move || {
+            poll_flash_progress(rx, progress_bar, status, cancel_button, iso, device);
+        });
+    }
+
+    glib::Propagation::Proceed
 }
 
 /// Render a duration the way a person would say it.
