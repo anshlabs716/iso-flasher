@@ -12,6 +12,7 @@
 //!    through a channel.
 
 use std::cell::RefCell;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -58,7 +59,9 @@ pub fn run() -> i32 {
         .build();
 
     application.connect_activate(build_window);
-    application.run().into()
+    // Filter out --gui so GTK doesn't see it as an unknown option
+    let args: Vec<String> = env::args().filter(|arg| arg != "--gui").collect();
+    application.run_with_args(&args).into()
 }
 
 fn build_window(application: &Application) {
@@ -69,12 +72,17 @@ fn build_window(application: &Application) {
         .default_height(520)
         .build();
 
-    let state = Arc::new(State {
-        selected_device: RefCell::new(None),
-        selected_iso: RefCell::new(None),
-        cancel: Arc::new(AtomicBool::new(false)),
-        progress_tx: RefCell::new(None),
-    });
+    let state = {
+        // State is only ever accessed on the GTK main thread, so Arc<RefCell<_>>
+        // is safe here. Clippy doesn't know this, so we silence the lint.
+        #[allow(clippy::arc_with_non_send_sync)]
+        Arc::new(State {
+            selected_device: RefCell::new(None),
+            selected_iso: RefCell::new(None),
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress_tx: RefCell::new(None),
+        })
+    };
 
     let root = gtk::Box::new(Orientation::Vertical, 18);
     root.set_margin_top(18);

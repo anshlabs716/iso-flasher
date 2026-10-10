@@ -210,6 +210,7 @@ mod inner {
     }
 
     /// Path of this program, for diagnostics.
+    #[allow(dead_code)]
     pub fn executable() -> Option<PathBuf> {
         std::env::current_exe().ok()
     }
