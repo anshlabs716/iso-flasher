@@ -39,6 +39,8 @@ sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
 sudo iso-flasher
 ```
 
+*Compilation takes 1–3 minutes on typical hardware — please be patient.*
+
 ### 3. (Optional) Build with the graphical window
 
 The GTK4 window is **not built by default** — it adds GTK and system dependencies. To enable it:
@@ -51,6 +53,8 @@ cargo build --release --features gui
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
 iso-flasher --gui
 ```
+
+*Compilation takes 2–5 minutes with the GUI feature — please be patient.*
 
 > The GUI runs as your desktop user and only escalates to root via `pkexec` when you click **Flash to USB**. It lists USB drives from sysfs, opens your desktop's native file chooser for the ISO, and shows live progress.
 
