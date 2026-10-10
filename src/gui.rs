@@ -326,9 +326,10 @@ fn populate_devices(list: &ListBox, state: &Arc<State>) {
         list.remove(&child);
     }
 
-    let devices = devices::removable_devices();
+    let all_devices: Vec<_> = devices::removable_devices();
+    let devices_for_selection = all_devices.clone();
 
-    if devices.is_empty() {
+    if all_devices.is_empty() {
         let empty = Label::new(Some(
             "No removable devices detected. Plug in a USB drive and press Refresh.",
         ));
@@ -339,7 +340,7 @@ fn populate_devices(list: &ListBox, state: &Arc<State>) {
         return;
     }
 
-    for device in devices {
+    for device in all_devices {
         let row = ListBoxRow::new();
         let inner = gtk::Box::new(Orientation::Vertical, 2);
         inner.set_margin_top(8);
@@ -365,6 +366,18 @@ fn populate_devices(list: &ListBox, state: &Arc<State>) {
 
         list.append(&row);
     }
+
+    // Also handle single-click selection: track selected row index
+    let device_list_for_selection = list.clone();
+    let state_for_selection = Arc::clone(state);
+    device_list_for_selection.connect_row_selected(move |_, row_opt| {
+        if let Some(row) = row_opt {
+            let index = row.index() as usize;
+            if index < devices_for_selection.len() {
+                *state_for_selection.selected_device.borrow_mut() = Some(devices_for_selection[index].clone());
+            }
+        }
+    });
 
     // Preselect when there is only one obvious choice.
     if list.first_child().is_some() {
