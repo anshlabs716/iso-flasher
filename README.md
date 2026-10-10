@@ -44,6 +44,8 @@ sudo iso-flasher
 The GTK4 window is **not built by default** — it adds GTK and system dependencies. To enable it:
 
 ```bash
+git clone https://github.com/anshlabs716/iso-flasher.git
+cd iso-flasher
 sudo apt install -y libgtk-4-dev pkg-config
 cargo build --release --features gui
 sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
