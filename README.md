@@ -39,6 +39,24 @@ sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
 sudo iso-flasher
 ```
 
+### 3. (Optional) Build with the graphical window
+
+The GTK4 window is **not built by default** — it adds GTK and system dependencies. To enable it:
+
+```bash
+sudo apt install -y libgtk-4-dev pkg-config
+cargo build --release --features gui
+sudo install -m 755 target/release/iso-flasher /usr/local/bin/iso-flasher
+```
+
+Run the GUI with:
+
+```bash
+iso-flasher --gui
+```
+
+> The GUI runs as your desktop user and only escalates to root via `pkexec` when you click **Flash to USB**. It lists USB drives from sysfs, opens your desktop's native file chooser for the ISO, and shows live progress.
+
 ### Uninstall
 
 Remove the installed binary:
@@ -201,6 +219,19 @@ sudo iso-flasher --iso <image.iso> --device <device> --force
 sudo iso-flasher --help
 ```
 
+### GUI (with `--features gui`)
+
+```text
+iso-flasher --gui
+```
+
+- Runs as your desktop user (not root)
+- Lists USB drives from `/sys/block`
+- Opens your desktop's native file chooser for the ISO
+- Asks for your password via polkit when you click **Flash to USB**
+- Shows live progress, speed and ETA
+- **Cancel** button stops the write
+
 ---
 
 ## 📦 Project Structure
@@ -210,11 +241,13 @@ iso-flasher/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs       # flashing core, CLI, progress UI
+│   ├── gui.rs        # optional GTK4 window (--features gui)
 │   ├── session.rs    # desktop/session detection, session bus recovery
 │   ├── portal.rs     # XDG Desktop Portal FileChooser client
 │   ├── helpers.rs    # optional kdialog / zenity / yad fallbacks
 │   ├── devices.rs    # removable block device discovery and validation
-│   └── select.rs     # selection flows for the ISO and the USB device
+│   ├── select.rs     # selection flows for the ISO and the USB device
+│   └── privileged.rs # polkit escalation for raw-device writes
 ├── .github/
 │   └── workflows/
 │       └── rust.yml

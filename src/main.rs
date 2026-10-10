@@ -14,6 +14,7 @@ mod devices;
 mod gui;
 mod helpers;
 mod portal;
+mod privileged;
 mod select;
 mod session;
 
@@ -268,6 +269,77 @@ fn run_internal_choose_iso() -> ! {
     }
 }
 
+/// Privileged child mode: validate, unmount and write.
+///
+/// Started by `pkexec` as root, so there is no portal here and
+/// no terminal UI: progress is reported as machine-readable
+/// `PROGRESS` lines on stdout for the window that launched us,
+/// and the exit code says how it ended.
+fn run_internal_flash(cli: Cli) -> ! {
+    let Some(iso) = cli.iso else {
+        eprintln!("no ISO was supplied");
+        std::process::exit(1);
+    };
+    let Some(device) = cli.device else {
+        eprintln!("no device was supplied");
+        std::process::exit(1);
+    };
+
+    let total = match validate_target(&iso, &device, cli.force) {
+        Ok(total) => total,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+
+    // The GUI confirms with its own button, so it always passes
+    // --yes. A terminal run keeps the typed confirmation.
+    if !cli.yes {
+        println!("{RED}{BOLD}This will erase {}.{RESET}", device.display());
+        match prompt("Type FLASH to continue: ") {
+            Ok(answer) if answer == "FLASH" => {}
+            _ => {
+                println!("{YELLOW}Aborted; nothing was written.{RESET}");
+                std::process::exit(privileged::CANCELLED);
+            }
+        }
+    }
+
+    if let Err(error) = select::unmount(&device) {
+        eprintln!("could not unmount the device: {error}");
+        std::process::exit(1);
+    }
+    unsafe { sync() };
+
+    let result = flash_with_progress(
+        &iso,
+        &device,
+        total,
+        |progress| {
+            println!(
+                "PROGRESS {} {} {} {}",
+                progress.written, progress.total, progress.speed, progress.eta
+            );
+        },
+        || !RUNNING.load(Ordering::SeqCst),
+    );
+
+    match result {
+        Ok(()) => {
+            println!("DONE");
+            std::process::exit(0);
+        }
+        Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+            std::process::exit(privileged::CANCELLED);
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Resolve both the ISO and the target device.
 fn interactive() -> io::Result<(PathBuf, PathBuf)> {
     title_screen();
@@ -302,6 +374,8 @@ struct Cli {
     force: bool,
     /// Launch the graphical window instead of the terminal interface.
     gui: bool,
+    /// Skip the interactive FLASH confirmation (used by the GUI).
+    yes: bool,
 }
 
 fn parse_args() -> Cli {
@@ -325,9 +399,14 @@ fn parse_args() -> Cli {
             }
             "-f" | "--force" => cli.force = true,
             "--gui" => cli.gui = true,
+            "-y" | "--yes" => cli.yes = true,
             // Internal: run the chooser as the desktop user and print the path.
             "--internal-choose-iso" => {
                 run_internal_choose_iso();
+            }
+            // Internal: run as root through pkexec and write to the device.
+            "--internal-flash" => {
+                run_internal_flash(cli);
             }
             "-h" | "--help" => {
                 println!(
@@ -594,6 +673,28 @@ fn flash(iso: &Path, device: &Path, total: u64) -> io::Result<()> {
     result
 }
 
+/// Validate, confirm, unmount and write.
+///
+/// Shared by the terminal flow and the privileged helper started by
+/// `pkexec`, which arrives with the paths already chosen and cannot
+/// ask anything interactively.
+fn run_flash(iso: &Path, device: &Path, force: bool, yes: bool) -> io::Result<()> {
+    let total = validate_target(iso, device, force)?;
+
+    if !yes {
+        println!("{RED}{BOLD}This will erase {}.{RESET}", device.display());
+        if prompt("Type FLASH to continue: ")? != "FLASH" {
+            println!("{YELLOW}Aborted; nothing was written.{RESET}");
+            return Ok(());
+        }
+    }
+
+    select::unmount(device)?;
+    unsafe { sync() };
+
+    flash(iso, device, total)
+}
+
 fn run() -> io::Result<()> {
     unsafe {
         signal(SIGINT, stop as *const () as usize);
@@ -622,24 +723,15 @@ fn run() -> io::Result<()> {
         _ => interactive()?,
     };
 
-    let total = validate_target(&iso, &device, cli.force)?;
-
-    println!("{RED}{BOLD}This will erase {}.{RESET}", device.display());
-    if prompt("Type FLASH to continue: ")? != "FLASH" {
-        println!("{YELLOW}Aborted; nothing was written.{RESET}");
-        return Ok(());
-    }
-
-    select::unmount(&device)?;
-    unsafe { sync() };
-
-    flash(&iso, &device, total)
+    run_flash(&iso, &device, cli.force, cli.yes)
 }
 
 fn main() {
-    // In child mode stdout is a pipe carrying the chosen path, so the terminal
-    // must not be cleared or coloured here.
-    if env::args().nth(1).as_deref() != Some("--internal-choose-iso") {
+    // In child modes stdout is a pipe, so the terminal must
+    // not be cleared or coloured here.
+    let first_arg = env::args().nth(1);
+    let first = first_arg.as_deref();
+    if first != Some("--internal-choose-iso") && first != Some("--internal-flash") {
         clear_screen();
     }
 

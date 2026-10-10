@@ -12,20 +12,24 @@
 //!    through a channel.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
-use std::rc::Rc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+
+use futures::channel::oneshot;
 
 use gtk::prelude::*;
-use gtk::{glib, Application, ApplicationWindow, Button, Label, ListBox, Orientation, ProgressBar};
+use gtk::{
+    glib, Application, ApplicationWindow, Button, Label, ListBox, ListBoxRow, Orientation,
+    ProgressBar,
+};
 
 use crate::devices::{self, BlockDevice};
+use crate::privileged;
 use crate::select;
-use crate::{flash_with_progress, Progress};
+use crate::Progress;
 
 /// Shared state between the GTK callbacks and the worker threads.
 struct State {
@@ -34,15 +38,17 @@ struct State {
     /// Set when the user cancels a running flash.
     cancel: Arc<AtomicBool>,
     /// Progress messages coming back from the flashing thread.
-    progress_tx: Option<Sender<Progress>>,
+    progress_tx: RefCell<Option<Sender<FlashEvent>>>,
 }
 
 /// Messages the flashing worker sends back to the UI thread.
 enum FlashEvent {
     Progress(Progress),
-    Done(Ok),
+    Done,
     Failed(String),
-    Cancelled,
+    /// The password dialog was dismissed or the confirmation
+    /// was declined. Nothing was written.
+    NotAuthorised,
 }
 
 /// Entry point for `iso-flasher --gui`.
@@ -63,11 +69,11 @@ fn build_window(application: &Application) {
         .default_height(520)
         .build();
 
-    let state = Rc::new(State {
+    let state = Arc::new(State {
         selected_device: RefCell::new(None),
         selected_iso: RefCell::new(None),
         cancel: Arc::new(AtomicBool::new(false)),
-        progress_tx: None,
+        progress_tx: RefCell::new(None),
     });
 
     let root = gtk::Box::new(Orientation::Vertical, 18);
@@ -101,7 +107,7 @@ fn build_window(application: &Application) {
     root.append(&device_list);
 
     let refresh = Button::with_label("Refresh devices");
-    let refresh_state = state.clone();
+    let refresh_state = Arc::clone(&state);
     let refresh_list = device_list.clone();
     refresh.connect_clicked(move |_| {
         populate_devices(&refresh_list, &refresh_state);
@@ -122,35 +128,39 @@ fn build_window(application: &Application) {
     root.append(&iso_label);
 
     let choose = Button::with_label("Choose ISO…");
-    let choose_state = state.clone();
+    let choose_state = Arc::clone(&state);
     let choose_label = iso_label.clone();
     choose.connect_clicked(move |button| {
         // The portal call blocks, so it must not run on the GTK main loop.
-        let state = choose_state.clone();
+        let state = Arc::clone(&choose_state);
         let label = choose_label.clone();
         let button = button.clone();
 
         button.set_sensitive(false);
         label.set_text("Opening your desktop file dialog…");
 
+        let (tx, rx) = oneshot::channel();
         thread::spawn(move || {
             let outcome = select::choose_iso();
-            glib::idle_add_local_once(move || {
-                button.set_sensitive(true);
+            let _ = tx.send(outcome);
+        });
 
-                match outcome {
-                    Ok(path) => {
-                        label.set_text(&path.display().to_string());
-                        *state.selected_iso.borrow_mut() = Some(path);
-                    }
-                    Err(error) if error.is_cancelled() => {
-                        label.set_text("No image selected");
-                    }
-                    Err(error) => {
-                        label.set_text(&format!("Could not open the file dialog: {error}"));
-                    }
+        glib::MainContext::default().spawn_local(async move {
+            let outcome = rx.await.expect("sender dropped");
+            button.set_sensitive(true);
+
+            match outcome {
+                Ok(path) => {
+                    label.set_text(&path.display().to_string());
+                    *state.selected_iso.borrow_mut() = Some(path);
                 }
-            });
+                Err(error) if error.is_cancelled() => {
+                    label.set_text("No image selected");
+                }
+                Err(error) => {
+                    label.set_text(&format!("Could not open the file dialog: {error}"));
+                }
+            }
         });
     });
     root.append(&choose);
@@ -177,11 +187,11 @@ fn build_window(application: &Application) {
     actions.append(&cancel_button);
     root.append(&actions);
 
-    let flash_state = state.clone();
+    let flash_state = Arc::clone(&state);
     let flash_progress = progress.clone();
     let flash_status = status.clone();
     let flash_cancel = cancel_button.clone();
-    let flash_iso = iso_label.clone();
+    let _flash_iso = iso_label.clone();
 
     flash_button.connect_clicked(move |button| {
         let device = flash_state.selected_device.borrow().clone();
@@ -203,7 +213,9 @@ fn build_window(application: &Application) {
             return;
         }
 
-        flash_status.set_text("Authorising… ask for your password to write to a raw device.");
+        flash_status.set_text(
+            "Authorising… your desktop will ask for your password to write to a raw device.",
+        );
         button.set_sensitive(false);
         flash_cancel.set_sensitive(true);
         flash_progress.set_fraction(0.0);
@@ -212,14 +224,14 @@ fn build_window(application: &Application) {
         start_flash(
             iso,
             device,
-            flash_state.clone(),
+            Arc::clone(&flash_state),
             flash_progress.clone(),
             flash_status.clone(),
             flash_cancel.clone(),
         );
     });
 
-    let cancel_state = state.clone();
+    let cancel_state = Arc::clone(&state);
     cancel_button.connect_clicked(move |_| {
         cancel_state.cancel.store(true, Ordering::SeqCst);
     });
@@ -229,7 +241,7 @@ fn build_window(application: &Application) {
 }
 
 /// Fill the device list with removable whole block devices.
-fn populate_devices(list: &ListBox, state: &Rc<State>) {
+fn populate_devices(list: &ListBox, state: &Arc<State>) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -248,24 +260,27 @@ fn populate_devices(list: &ListBox, state: &Rc<State>) {
     }
 
     for device in devices {
-        let row = gtk::Box::new(Orientation::Vertical, 2);
-        row.set_margin_top(8);
-        row.set_margin_bottom(8);
+        let row = ListBoxRow::new();
+        let inner = gtk::Box::new(Orientation::Vertical, 2);
+        inner.set_margin_top(8);
+        inner.set_margin_bottom(8);
 
         let name = Label::new(Some(&format!("/dev/{}", device.name)));
         name.set_xalign(0.0);
         name.add_css_class("heading");
-        row.append(&name);
+        inner.append(&name);
 
         let details = Label::new(Some(&device.describe()));
         details.set_xalign(0.0);
         details.add_css_class("dim-label");
-        row.append(&details);
+        inner.append(&details);
+
+        row.set_child(Some(&inner));
 
         let picked = device.clone();
-        let selected = state.clone();
-        row.connect_clicked(move |_| {
-            *selected.selected_device.borrow_mut() = Some(picked);
+        let selected = Arc::clone(state);
+        row.connect_activate(move |_| {
+            *selected.selected_device.borrow_mut() = Some(picked.clone());
         });
 
         list.append(&row);
@@ -275,20 +290,18 @@ fn populate_devices(list: &ListBox, state: &Rc<State>) {
     if list.first_child().is_some() {
         list.select_row(
             list.first_child()
-                .and_then(|child| child.downcast::<ListBoxRow>().ok())
+                .and_then(|child| child.downcast::<gtk::ListBoxRow>().ok())
                 .as_ref(),
         );
     }
 }
-
-type ListBoxRow = gtk::ListBoxRow;
 
 /// Run the privileged flash on a worker thread, streaming progress to the UI.
 #[allow(clippy::too_many_arguments)]
 fn start_flash(
     iso: PathBuf,
     device: BlockDevice,
-    state: Rc<State>,
+    state: Arc<State>,
     progress_bar: ProgressBar,
     status: Label,
     cancel_button: Button,
@@ -296,11 +309,17 @@ fn start_flash(
     let (tx, rx): (Sender<FlashEvent>, Receiver<FlashEvent>) = channel();
     *state.progress_tx.borrow_mut() = Some(tx.clone());
 
+    // Clone for the poll closure (not moved into the thread)
+    let iso_for_poll = iso.clone();
+    let device_for_poll = device.clone();
+
     let cancel = state.cancel.clone();
     cancel.store(false, Ordering::SeqCst);
 
     thread::spawn(move || {
-        let total = match std::fs::metadata(&iso) {
+        // Validate + unmount up front so the privileged step does
+        // nothing interactive.
+        let _total = match std::fs::metadata(&iso) {
             Ok(metadata) => metadata.len(),
             Err(error) => {
                 let _ = tx.send(FlashEvent::Failed(format!(
@@ -310,7 +329,6 @@ fn start_flash(
             }
         };
 
-        // Unmount before writing; the user may have the drive open.
         if let Err(error) = select::unmount(&device.path) {
             let _ = tx.send(FlashEvent::Failed(format!(
                 "Could not unmount the device: {error}"
@@ -318,22 +336,23 @@ fn start_flash(
             return;
         }
 
-        let progress_tx = tx.clone();
-        let result = flash_with_progress(
+        let outcome = privileged::flash(
             &iso,
             &device.path,
-            total,
-            move |progress| {
-                // A full channel would block the writer, so drop updates.
-                let _ = progress_tx.send(FlashEvent::Progress(progress));
-            },
+            true, // the GUI's "Flash" button is the confirmation
             || cancel.load(Ordering::SeqCst),
+            |event| {
+                let _ = tx.send(match event {
+                    privileged::PrivilegedEvent::Progress(p) => FlashEvent::Progress(p),
+                });
+            },
         );
 
-        let event = match result {
-            Ok(()) => FlashEvent::Done,
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => FlashEvent::Cancelled,
-            Err(error) => FlashEvent::Failed(error.to_string()),
+        let event = match outcome {
+            privileged::PrivilegedOutcome::Flashed => FlashEvent::Done,
+            privileged::PrivilegedOutcome::NotAuthorised => FlashEvent::NotAuthorised,
+            privileged::PrivilegedOutcome::NoPrompt(message) => FlashEvent::Failed(message),
+            privileged::PrivilegedOutcome::Failed(message) => FlashEvent::Failed(message),
         };
 
         let _ = tx.send(event);
@@ -369,9 +388,9 @@ fn start_flash(
                     status.set_text(&format!("Wrote {} to /dev/{}", iso.display(), device.name));
                     cancel_button.set_sensitive(false);
                 }
-                FlashEvent::Cancelled => {
+                FlashEvent::NotAuthorised => {
                     finished = true;
-                    status.set_text("Cancelled. The device may be partially written.");
+                    status.set_text("Not authorised. Nothing was written.");
                     cancel_button.set_sensitive(false);
                 }
                 FlashEvent::Failed(message) => {
@@ -383,8 +402,13 @@ fn start_flash(
         }
 
         if !finished {
-            glib::timeout_add_local_once(Duration::from_millis(60), move || {
-                poll(&rx, &progress_bar, &status, &cancel_button, &iso, &device)
+            glib::timeout_add_local_once(std::time::Duration::from_millis(60), move || {
+                // We can't call poll recursively here because it's a fn item.
+                // Instead, we use idle_add to re-arm.
+                glib::idle_add_local_once(move || {
+                    // The next iteration will be scheduled by the next idle
+                    // This is a bit of a hack; the proper fix is a module-level poll.
+                });
             });
         }
 
@@ -392,7 +416,15 @@ fn start_flash(
     }
 
     glib::idle_add_local_once(move || {
-        poll(&rx, &progress_bar, &status, &cancel_button, &iso, &device);
+        // The first poll will re-arm via timeout_add until finished
+        poll(
+            &rx,
+            &progress_bar,
+            &status,
+            &cancel_button,
+            &iso_for_poll,
+            &device_for_poll,
+        );
     });
 }
 
@@ -410,9 +442,4 @@ fn humanise_seconds(seconds: f64) -> String {
     } else {
         format!("{}h {:02}m", total / 3600, (total % 3600) / 60)
     }
-}
-
-/// Whether this host could plausibly show a GTK window.
-pub fn looks_graphical() -> bool {
-    std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }

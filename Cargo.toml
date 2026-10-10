@@ -13,10 +13,11 @@ zbus = { version = "5", features = ["blocking-api"] }
 # GTK4 for the optional graphical window (`iso-flasher --gui`). Only linked in
 # when the `gui` feature is enabled, so the CLI stays dependency-light.
 gtk = { version = "0.11", package = "gtk4", optional = true }
+futures = { version = "0.3", optional = true }
 
 [features]
 default = []
-gui = ["dep:gtk"]
+gui = ["dep:gtk", "dep:futures"]
 
 [[bin]]
 name = "iso-flasher"
