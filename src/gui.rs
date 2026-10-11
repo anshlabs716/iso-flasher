@@ -449,67 +449,6 @@ fn start_flash(
 
     // Drain the channel on the GTK main loop, re-arming until finished.
     let rx = Arc::new(Mutex::new(rx));
-    let poll = {
-        let rx = Arc::clone(&rx);
-        let progress_bar = progress_bar.clone();
-        let status = status.clone();
-        let cancel_button = cancel_button.clone();
-        let iso = iso_for_poll.clone();
-        let device = device_for_poll.clone();
-
-        move || -> glib::Propagation {
-            let mut finished = false;
-
-            while let Ok(event) = {
-                let rx = rx.lock().unwrap();
-                rx.try_recv()
-            } {
-                match event {
-                    FlashEvent::Progress(progress) => {
-                        let fraction = (progress.percentage() / 100.0).clamp(0.0, 1.0);
-                        progress_bar.set_fraction(fraction);
-                        progress_bar.set_text(Some(&format!("{:.1}%", progress.percentage())));
-                        status.set_text(&format!(
-                            "{:.1} MiB/s · about {} left",
-                            progress.speed,
-                            humanise_seconds(progress.eta)
-                        ));
-                    }
-                    FlashEvent::Done => {
-                        finished = true;
-                        progress_bar.set_fraction(1.0);
-                        progress_bar.set_text(Some("Done"));
-                        status.set_text(&format!("Wrote {} to /dev/{}", iso.display(), device.name));
-                        cancel_button.set_sensitive(false);
-                    }
-                    FlashEvent::NotAuthorised => {
-                        finished = true;
-                        status.set_text("Not authorised. Nothing was written.");
-                        cancel_button.set_sensitive(false);
-                    }
-                    FlashEvent::Failed(message) => {
-                        finished = true;
-                        status.set_text(&format!("Failed: {message}"));
-                        cancel_button.set_sensitive(false);
-                    }
-                }
-            }
-
-            if !finished {
-                let rx = Arc::clone(&rx);
-                let progress_bar = progress_bar.clone();
-                let status = status.clone();
-                let cancel_button = cancel_button.clone();
-                let iso = iso.clone();
-                let device = device.clone();
-                glib::timeout_add_local_once(Duration::from_millis(60), move || {
-                    poll_flash_progress(rx, progress_bar, status, cancel_button, iso, device);
-                });
-            }
-
-            glib::Propagation::Proceed
-        }
-    };
 
     glib::idle_add_local_once(move || {
         poll_flash_progress(rx, progress_bar.clone(), status.clone(), cancel_button.clone(), iso_for_poll, device_for_poll);

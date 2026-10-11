@@ -344,7 +344,24 @@ pub fn choose_device(explicit: Option<&Path>) -> Result<BlockDevice, SelectionEr
     Ok(device)
 }
 
+/// Returns true if the given block-device path appears in /proc/mounts.
+fn is_mounted(dev: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string("/proc/mounts") else {
+        // If we cannot read /proc/mounts, fall back to attempting the unmount.
+        return true;
+    };
+    let dev_str = dev.display().to_string();
+    content.lines().any(|line| {
+        line.split_whitespace()
+            .next()
+            .is_some_and(|source| source == dev_str)
+    })
+}
+
 /// Unmount every mounted partition of a device, then the device itself.
+///
+/// Targets that are not mounted are skipped entirely so `umount` never
+/// prints "not mounted" noise to the terminal.
 pub fn unmount(device: &Path) -> io::Result<()> {
     let name = device
         .file_name()
@@ -367,8 +384,15 @@ pub fn unmount(device: &Path) -> io::Result<()> {
     targets.push(device.to_path_buf());
 
     for target in targets {
+        // Only run umount when the target is actually mounted.
+        if !is_mounted(&target) {
+            continue;
+        }
+
         let status = std::process::Command::new("/bin/umount")
             .arg(&target)
+            .stderr(std::process::Stdio::null()) // suppress "not mounted" noise
+            .stdout(std::process::Stdio::null())
             .status()?;
 
         // 32 == "not mounted", which is the desired state already.
