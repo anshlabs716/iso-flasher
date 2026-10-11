@@ -376,6 +376,8 @@ struct Cli {
     gui: bool,
     /// Skip the interactive FLASH confirmation (used by the GUI).
     yes: bool,
+    /// Internal: run as root through pkexec and write to the device.
+    internal_flash: bool,
 }
 
 fn parse_args() -> Cli {
@@ -406,7 +408,7 @@ fn parse_args() -> Cli {
             }
             // Internal: run as root through pkexec and write to the device.
             "--internal-flash" => {
-                run_internal_flash(cli);
+                cli.internal_flash = true;
             }
             "-h" | "--help" => {
                 println!(
@@ -428,6 +430,12 @@ fn parse_args() -> Cli {
             argument => eprintln!("{YELLOW}Ignoring unknown argument: {argument}{RESET}"),
         }
         index += 1;
+    }
+
+    // Dispatch internal-flash after all args are parsed, so --iso
+    // and --device that come after --internal-flash are picked up.
+    if cli.internal_flash {
+        run_internal_flash(cli);
     }
 
     cli
