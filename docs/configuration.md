@@ -2,8 +2,6 @@
 
 How to configure iso-flasher.
 
-# Configuration
-
 Reference for configuring iso-flasher.
 
 ## Where configuration lives

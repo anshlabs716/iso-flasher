@@ -2,8 +2,6 @@
 
 High-level structure of iso-flasher.
 
-# Architecture
-
 This page describes the high-level structure of iso-flasher. It is a starting
 point and is updated as the implementation evolves.
 
@@ -13,7 +11,7 @@ iso-flasher
 
 ## Main components
 
-- `**Rust standard library** and crates in `Cargo.toml``
+- **Rust standard library** and crates in `Cargo.toml`
 
 ## Data flow
 

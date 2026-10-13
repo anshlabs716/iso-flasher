@@ -2,8 +2,6 @@
 
 Architecture decision records for iso-flasher.
 
-# Architecture Decision Records
-
 This directory records significant architecture decisions for iso-flasher.
 
 ## What is an ADR?
