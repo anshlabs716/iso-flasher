@@ -171,7 +171,7 @@ Safety rules that always apply:
 | Platform | Status |
 |---|---|
 | 🐧 Linux | 🟢 Primary development target |
-| 📱 Termux | 🟡 Coming soon |
+| 📱 Termux | 🟡 I can't do Termux so it will be a apk|
 | 🍎 macOS | 🔴 Not supported by current Linux block-device backend |
 | 😈 BSD | 🟡 Not tested |
 | 🪟 Windows | 🔴 Not currently supported AND NEVER WILL BE 🤣 go switch to Linux! |
