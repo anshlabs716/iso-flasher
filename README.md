@@ -18,16 +18,48 @@
 
 ### 1. Install prerequisites
 
-For Debian, Ubuntu, MX Linux, and other APT-based systems, install everything needed to build iso-flasher:
+For Debian, Ubuntu, MX Linux, and other APT-based systems, install the native build tools:
 
 ```bash
 sudo apt update
-sudo apt install -y git gcc rustc cargo
+sudo apt install -y git gcc curl
 ```
 
-> GCC provides the native Linux toolchain used by Rust's build/link process. Rust and Cargo are installed directly from the distro packages. No CMake or rustup setup is required.
+GCC provides the native Linux toolchain used by Rust's build and linking process.
 
-The XDG Desktop Portal client is a Rust crate (`zbus`), so there are **no extra system packages** and no desktop-specific dependencies to install.
+#### Rust & Cargo
+
+> ⚠️ **Version requirement:** `iso-flasher` uses Cargo lockfile v4, which requires **Rust/Cargo 1.78 or newer**. The default `rustc` and `cargo` packages on some distributions, including Debian 12 and Ubuntu 22.04/24.04, may be too old.
+
+**Option A — Versioned APT packages (where available)**
+
+On Ubuntu 24.04 (Noble), try the versioned packages:
+
+```bash
+sudo apt install -y rustc-1.78 cargo-1.78
+```
+
+**Option B — rustup (recommended; works across supported distributions)**
+
+Install a current Rust toolchain with rustup:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+Verify that Rust and Cargo meet the minimum version:
+
+```bash
+rustc --version
+cargo --version
+```
+
+Both should be version **1.78 or newer**. If the commands are not found after installation, open a new terminal or run `source "$HOME/.cargo/env"` again.
+
+No CMake is required.
+
+The XDG Desktop Portal client is a Rust crate (`zbus`), so there are **no extra system packages** and no desktop-specific dependencies to install for the default CLI build.
 
 ### 2. Install and run iso-flasher
 
